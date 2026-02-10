@@ -2,8 +2,9 @@
 set -euo pipefail
 
 DOTFILES_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOST_ENV="${1:-}"
 
-MERGE_TOOL="${MERGE_TOOL:-vimdiff}"
+MERGE_TOOL="${MERGE_TOOL:-code --wait --diff}"
 
 link_file() {
   local src="$1"
@@ -94,8 +95,63 @@ link_file() {
 }
 
 # ----- Claude Code -----
-link_file "$DOTFILES_DIR/.claude/settings.json" \
-          "$HOME/.claude/settings.json"
+
+# 環境別設定のマージ
+if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json" ]; then
+  echo "環境: $HOST_ENV"
+
+  if command -v jq &> /dev/null; then
+    # jqで設定をマージ（配列は自動的に結合）
+    jq -s '
+      def merge_with_arrays:
+        . as [$a, $b] |
+        if ($a | type) == "object" and ($b | type) == "object" then
+          ($a + $b) | to_entries | map(
+            .key as $k |
+            .value as $v |
+            if ($a | has($k)) and ($b | has($k)) then
+              if ($a[$k] | type) == "array" and ($b[$k] | type) == "array" then
+                {key: $k, value: ($a[$k] + $b[$k])}
+              elif ($a[$k] | type) == "object" and ($b[$k] | type) == "object" then
+                {key: $k, value: ([($a[$k]), ($b[$k])] | merge_with_arrays)}
+              else
+                {key: $k, value: $v}
+              end
+            else
+              {key: $k, value: $v}
+            end
+          ) | from_entries
+        elif ($a | type) == "array" and ($b | type) == "array" then
+          $a + $b
+        else
+          $b
+        end;
+
+      [.[0], .[1]] | merge_with_arrays
+    ' \
+      "$DOTFILES_DIR/.claude/settings.json" \
+      "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json" \
+      > "$DOTFILES_DIR/.claude/settings.merged.json"
+
+    link_file "$DOTFILES_DIR/.claude/settings.merged.json" \
+              "$HOME/.claude/settings.json"
+
+    echo "設定をマージしました: settings.json + settings.local/$HOST_ENV.json"
+  else
+    echo "警告: jqがインストールされていません。設定のマージをスキップします。"
+    link_file "$DOTFILES_DIR/.claude/settings.json" \
+              "$HOME/.claude/settings.json"
+  fi
+elif [ -n "$HOST_ENV" ]; then
+  echo "警告: settings.local/$HOST_ENV.json が見つかりません"
+  link_file "$DOTFILES_DIR/.claude/settings.json" \
+            "$HOME/.claude/settings.json"
+else
+  echo "環境が指定されていません。共通設定のみを使用します。"
+  echo "使い方: ./setup.sh [home|work]"
+  link_file "$DOTFILES_DIR/.claude/settings.json" \
+            "$HOME/.claude/settings.json"
+fi
 
 link_file "$DOTFILES_DIR/.claude/skills/docbase-mermaid/SKILL.md" \
           "$HOME/.claude/skills/docbase-mermaid/SKILL.md"

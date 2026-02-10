@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python ~/.claude/skills/ios-simulator-skill/scripts/*)",
+      "Bash(bash ~/.claude/skills/ios-simulator-skill/scripts/*)",
+      "Bash(cd ~/.claude/skills/ios-simulator-skill/scripts*)",
+      "Bash(xcrun simctl:*)",
+      "Bash(xcrun xcresulttool:*)",
+      "Bash(idb ui:*)",
+      "Bash(sleep:*)"
+    ]
+  },
+  "enabledPlugins": {
+    "swift-lsp@claude-plugins-official": true,
+    "xclaude-plugin@xclaude-plugin-marketplace": true
+  }
+}

@@ -1,4 +1,5 @@
 {
+  "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [
       "Bash(python ~/.claude/skills/ios-simulator-skill/scripts/*)",

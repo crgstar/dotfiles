@@ -156,5 +156,26 @@ fi
 link_file "$DOTFILES_DIR/.claude/skills/docbase-mermaid/SKILL.md" \
           "$HOME/.claude/skills/docbase-mermaid/SKILL.md"
 
+# MCP サーバー設定のマージ
+if [ -f "$HOME/.claude.json" ] && command -v jq &> /dev/null; then
+  if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json" ]; then
+    # $HOST_ENV.json から mcpServers を抽出
+    MCP_SERVERS=$(jq '.mcpServers // {}' "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json")
+
+    if jq -e '.mcpServers | length > 0' "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json" &> /dev/null; then
+      echo ""
+      echo "MCP サーバー設定をマージしています..."
+
+      # .claude.json の mcpServers セクションにマージ
+      jq --argjson new_servers "$MCP_SERVERS" \
+         '.mcpServers = (.mcpServers // {}) * $new_servers' \
+         "$HOME/.claude.json" > "$HOME/.claude.json.tmp"
+
+      mv "$HOME/.claude.json.tmp" "$HOME/.claude.json"
+      echo "MCP サーバー設定をマージしました"
+    fi
+  fi
+fi
+
 echo ""
 echo "done!"

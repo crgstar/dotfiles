@@ -14,5 +14,11 @@
   "enabledPlugins": {
     "swift-lsp@claude-plugins-official": true,
     "xclaude-plugin@xclaude-plugin-marketplace": true
+  },
+  "mcpServers": {
+    "ios-simulator": {
+      "command": "npx",
+      "args": ["-y", "ios-simulator-mcp"]
+    }
   }
 }

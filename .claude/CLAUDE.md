@@ -1,0 +1,3 @@
+- askUserQuestionTool を積極的に使うこと
+- コミット前に /simplify すること
+- ソース中コメントは「why」を優先して書くこと

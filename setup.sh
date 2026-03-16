@@ -153,6 +153,9 @@ else
             "$HOME/.claude/settings.json"
 fi
 
+link_file "$DOTFILES_DIR/.claude/CLAUDE.md" \
+          "$HOME/.claude/CLAUDE.md"
+
 link_file "$DOTFILES_DIR/.claude/skills/docbase-mermaid/SKILL.md" \
           "$HOME/.claude/skills/docbase-mermaid/SKILL.md"
 

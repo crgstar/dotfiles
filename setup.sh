@@ -289,6 +289,7 @@ if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/CLAUDE.local/$HOST_ENV.md" 
   safe_overwrite "$DOTFILES_DIR/.claude/CLAUDE.merged.md.tmp" \
                  "$DOTFILES_DIR/.claude/CLAUDE.merged.md"
 
+
   claude_src="$DOTFILES_DIR/.claude/CLAUDE.merged.md"
   echo "CLAUDE.md をマージしました: CLAUDE.md + CLAUDE.local/$HOST_ENV.md"
 else

@@ -1,10 +1,8 @@
-eval "$(mise activate zsh)" 
+eval "$(mise activate zsh)"
 export PATH="$HOME/.local/bin:$PATH"
-export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
-eval "$(direnv hook zsh)"
 
 # bun completions
-[ -s "/Users/kumazaki/.bun/_bun" ] && source "/Users/kumazaki/.bun/_bun"
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
 # bun
 export BUN_INSTALL="$HOME/.bun"

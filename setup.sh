@@ -163,8 +163,16 @@ else
             "$HOME/.claude/settings.json"
 fi
 
-link_file "$DOTFILES_DIR/.claude/CLAUDE.md" \
-          "$HOME/.claude/CLAUDE.md"
+# CLAUDE.md の結合（共通 + 環境別）
+if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/CLAUDE.local/$HOST_ENV.md" ]; then
+  { cat "$DOTFILES_DIR/.claude/CLAUDE.md"; echo; cat "$DOTFILES_DIR/.claude/CLAUDE.local/$HOST_ENV.md"; } \
+    > "$DOTFILES_DIR/.claude/CLAUDE.merged.md"
+  claude_src="$DOTFILES_DIR/.claude/CLAUDE.merged.md"
+  echo "CLAUDE.md をマージしました: CLAUDE.md + CLAUDE.local/$HOST_ENV.md"
+else
+  claude_src="$DOTFILES_DIR/.claude/CLAUDE.md"
+fi
+link_file "$claude_src" "$HOME/.claude/CLAUDE.md"
 
 link_file "$DOTFILES_DIR/.claude/skills/docbase-mermaid/SKILL.md" \
           "$HOME/.claude/skills/docbase-mermaid/SKILL.md"

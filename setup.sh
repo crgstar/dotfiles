@@ -94,6 +94,16 @@ link_file() {
   fi
 }
 
+# ----- Shell -----
+
+link_file "$DOTFILES_DIR/.zshrc" \
+          "$HOME/.zshrc"
+
+if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/zshrc.local/$HOST_ENV.zsh" ]; then
+  link_file "$DOTFILES_DIR/zshrc.local/$HOST_ENV.zsh" \
+            "$HOME/.zshrc.local"
+fi
+
 # ----- Claude Code -----
 
 # 環境別設定のマージ

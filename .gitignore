@@ -1,4 +1,5 @@
 *.bak
 .DS_Store
 .claude/settings.merged.json
+.claude/CLAUDE.merged.md
 .claude/settings.local.json

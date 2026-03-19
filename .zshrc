@@ -12,6 +12,7 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 typeset -A abbreviations
 abbreviations=(
   "cl" "claude"
+  "ｃｌ" "claude"
 )
 
 expand-abbreviation() {

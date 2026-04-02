@@ -6,6 +6,82 @@ HOST_ENV="${1:-}"
 
 MERGE_TOOL="${MERGE_TOOL:-code --wait --diff}"
 
+# マージ生成ファイルの上書き前に既存内容との差分を確認する
+# 差分がなければそのまま上書き、差分があればユーザに選択を求める
+safe_overwrite() {
+  local new_content_file="$1"  # 新しく生成された一時ファイル
+  local dest="$2"              # 上書き対象
+
+  if [ ! -f "$dest" ]; then
+    mv "$new_content_file" "$dest"
+    return
+  fi
+
+  if diff -q "$new_content_file" "$dest" > /dev/null 2>&1; then
+    # 差分なし — そのまま上書き
+    mv "$new_content_file" "$dest"
+    return
+  fi
+
+  echo ""
+  echo "========================================="
+  echo "CONFLICT: $dest"
+  echo "マージ元にない変更が既存ファイルに含まれています"
+  echo "========================================="
+  diff -u "$new_content_file" "$dest" || true
+  echo "========================================="
+  echo ""
+  echo "  n) 新しいマージ結果で上書き (既存は .bak に保存)"
+  echo "  k) 既存の内容を残す (マージ結果を破棄)"
+  echo "  m) マージする ($MERGE_TOOL で編集)"
+  echo "  s) スキップ"
+  echo ""
+  read -rp "  選択 [n/k/m/s]: " choice
+
+  case "$choice" in
+    n)
+      cp "$dest" "${dest}.bak"
+      mv "$new_content_file" "$dest"
+      echo "  -> 新しいマージ結果を採用 (バックアップ: ${dest}.bak)"
+      ;;
+    k)
+      rm "$new_content_file"
+      echo "  -> 既存の内容を維持"
+      ;;
+    m)
+      cp "$dest" "${dest}.bak"
+      echo "  -> $MERGE_TOOL を起動します..."
+      echo "     左: 新しいマージ結果 ($new_content_file)"
+      echo "     右: 既存 ($dest)"
+      $MERGE_TOOL "$new_content_file" "$dest"
+
+      echo ""
+      echo "  マージ結果 ($dest):"
+      echo "  -----------------------------------------"
+      cat "$dest"
+      echo "  -----------------------------------------"
+      read -rp "  この内容でよいですか？ [y/n]: " confirm
+
+      if [ "$confirm" = "y" ]; then
+        rm -f "$new_content_file"
+        echo "  -> マージ完了 (バックアップ: ${dest}.bak)"
+      else
+        cp "${dest}.bak" "$dest"
+        rm -f "$new_content_file"
+        echo "  -> 取り消し、変更なし"
+      fi
+      ;;
+    s)
+      rm -f "$new_content_file"
+      echo "  -> スキップ"
+      ;;
+    *)
+      rm -f "$new_content_file"
+      echo "  -> 不明な入力、スキップ"
+      ;;
+  esac
+}
+
 link_file() {
   local src="$1"
   local dest="$2"
@@ -141,7 +217,10 @@ if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.js
     ' \
       "$DOTFILES_DIR/.claude/settings.json" \
       "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json" \
-      > "$DOTFILES_DIR/.claude/settings.merged.json"
+      > "$DOTFILES_DIR/.claude/settings.merged.json.tmp"
+
+    safe_overwrite "$DOTFILES_DIR/.claude/settings.merged.json.tmp" \
+                   "$DOTFILES_DIR/.claude/settings.merged.json"
 
     link_file "$DOTFILES_DIR/.claude/settings.merged.json" \
               "$HOME/.claude/settings.json"
@@ -166,7 +245,11 @@ fi
 # CLAUDE.md の結合（共通 + 環境別）
 if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/CLAUDE.local/$HOST_ENV.md" ]; then
   { cat "$DOTFILES_DIR/.claude/CLAUDE.md"; echo; cat "$DOTFILES_DIR/.claude/CLAUDE.local/$HOST_ENV.md"; } \
-    > "$DOTFILES_DIR/.claude/CLAUDE.merged.md"
+    > "$DOTFILES_DIR/.claude/CLAUDE.merged.md.tmp"
+
+  safe_overwrite "$DOTFILES_DIR/.claude/CLAUDE.merged.md.tmp" \
+                 "$DOTFILES_DIR/.claude/CLAUDE.merged.md"
+
   claude_src="$DOTFILES_DIR/.claude/CLAUDE.merged.md"
   echo "CLAUDE.md をマージしました: CLAUDE.md + CLAUDE.local/$HOST_ENV.md"
 else

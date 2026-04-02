@@ -96,6 +96,7 @@
       "Bash(sw_vers *)",
       "Bash(sysctl *)",
       "Bash(nproc *)",
+      "Bash(uuidgen *)",
       "Bash(copilot *レビュー*)",
       "Skill(example-skills:skill-creator)",
       "Skill(superpowers:using-git-worktrees)",

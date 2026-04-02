@@ -1,3 +1,4 @@
+eval "$(/opt/homebrew/bin/brew shellenv)"
 eval "$(mise activate zsh)"
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -25,6 +26,9 @@ expand-abbreviation() {
 }
 zle -N expand-abbreviation
 bindkey '^M' expand-abbreviation
+
+# Claude Code: ちらつき防止（alt-screen レンダリング）
+export CLAUDE_CODE_NO_FLICKER=1
 
 # 環境別の追加設定を読み込む
 [[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"

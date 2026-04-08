@@ -170,6 +170,22 @@ link_file() {
   fi
 }
 
+# ----- Ghostty -----
+
+if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/ghostty/config.local/$HOST_ENV" ]; then
+  { cat "$DOTFILES_DIR/ghostty/config"; echo; cat "$DOTFILES_DIR/ghostty/config.local/$HOST_ENV"; } \
+    > "$DOTFILES_DIR/ghostty/config.merged.tmp"
+
+  safe_overwrite "$DOTFILES_DIR/ghostty/config.merged.tmp" \
+                 "$DOTFILES_DIR/ghostty/config.merged"
+
+  ghostty_src="$DOTFILES_DIR/ghostty/config.merged"
+  echo "Ghostty config をマージしました: config + config.local/$HOST_ENV"
+else
+  ghostty_src="$DOTFILES_DIR/ghostty/config"
+fi
+link_file "$ghostty_src" "$HOME/.config/ghostty/config"
+
 # ----- Shell -----
 
 link_file "$DOTFILES_DIR/.zshrc" \

@@ -1,0 +1,5 @@
+font-family = "UDEV Gothic 35NF"
+font-family-bold = "UDEV Gothic 35NF Bold"
+font-size = 14
+# JIS配列では = が Shift+- なので、Cmd+= が decrease として動いてしまう
+keybind = cmd+shift+minus=increase_font_size:1

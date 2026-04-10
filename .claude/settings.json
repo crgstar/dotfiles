@@ -105,7 +105,10 @@
       "Skill(example-skills:skill-creator)",
       "Skill(superpowers:using-git-worktrees)",
       "Skill(frontend-design)",
-      "Skill(dig:dig)"
+      "Skill(dig:dig)",
+      "mcp__plugin_context7_context7__query-docs",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "Bash(mkdir:*)"
     ],
     "deny": [
       "Bash(rm -rf / *)",
@@ -136,7 +139,15 @@
     "superpowers@superpowers-marketplace": true,
     "dig@kuu-marketplace": true,
     "code-simplifier@claude-plugins-official": true,
-    "code-review@claude-plugins-official": true
+    "code-review@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "hookify@claude-plugins-official": true
   },
-  "language": "Japanese"
+  "language": "Japanese",
+  "voiceEnabled": true,
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  }
 }

@@ -1,6 +1,12 @@
 {
   "permissions": {
-    "allow": [],
+    "allow": [
+      "Bash(npx vitest:*)",
+      "mcp__docbase-mcp__searchPosts",
+      "mcp__docbase-mcp__getPost",
+      "mcp__docbase-mcp__getComments",
+      "mcp__docbase-mcp__downloadAttachment"
+    ],
     "deny": [],
     "ask": []
   },

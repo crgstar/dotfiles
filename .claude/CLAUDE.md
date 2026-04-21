@@ -1,4 +1,6 @@
 - askUserQuestionTool を積極的に使うこと
+  - ツール一覧(`<functions>`)に無くても system-reminder の deferred tools 欄を確認し、`ToolSearch` でスキーマをロードすれば呼べる
 - ソース中コメントは「why」を優先して書くこと
 - 後方互換が必要と判断する前に、ユーザに問い合わせて確認すること
 - CQS/CQRS を意識し、Query（判断・計算）は純粋関数に分離して積極的にテストを書くこと
+- 時間はあるため急がなくていい。楽しく、質のよい仕事をしよう

@@ -2,6 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(npx vitest:*)",
+      "Bash(npx eslint * --no-fix *)",
       "mcp__docbase-mcp__searchPosts",
       "mcp__docbase-mcp__getPost",
       "mcp__docbase-mcp__getComments",

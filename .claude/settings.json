@@ -130,7 +130,8 @@
       "Bash(mkdir:*)",
       "Bash(bun test:*)",
       "Bash(npm search:*)",
-      "Bash(screenshot-capture:*)"
+      "Bash(screenshot-capture:*)",
+      "Bash(gh api *)"
     ],
     "deny": [
       "Bash(rm -rf / *)",
@@ -144,8 +145,7 @@
       "Bash(git commit *)",
       "Bash(git push *)",
       "Bash(gh pr create *)",
-      "Bash(rm *)",
-      "Bash(gh api *)"
+      "Bash(rm *)"
     ]
   },
   "hooks": {
@@ -156,7 +156,7 @@
           {
             "type": "command",
             "if": "Bash(gh api *)",
-            "command": "jq -r '.tool_input.command' | { read -r cmd; if echo \"$cmd\" | grep -qE -- '-X[[:space:]]*GET|--method[[:space:]]+GET'; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"gh api GET (explicit)\"}}'; elif echo \"$cmd\" | grep -qE -- '[[:space:]]-(f|F)[[:space:]]|[[:space:]]--input[[:space:]]|[[:space:]]-X[[:space:]]|[[:space:]]--method[[:space:]]'; then echo '{}'; else echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"gh api GET (default)\"}}'; fi; }"
+            "command": "jq -r '.tool_input.command' | { read -r cmd; if echo \"$cmd\" | grep -qE -- '[[:space:]]-(f|F)[[:space:]]|[[:space:]]--input[[:space:]]|[[:space:]]-X[[:space:]]|[[:space:]]--method[[:space:]]'; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"gh api write detected\"}}'; else echo '{}'; fi; }"
           }
         ]
       }

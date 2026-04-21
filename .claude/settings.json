@@ -4,6 +4,7 @@
       "Read(*)",
       "Bash(ls *)",
       "Bash(cat *)",
+      "Bash(cat */.mirugit/*)",
       "Bash(tree *)",
       "Bash(find *)",
       "Bash(grep *)",
@@ -47,7 +48,22 @@
       "Bash(git remote *)",
       "Bash(git blame *)",
       "Bash(git rev-parse *)",
+      "Bash(git merge-base *)",
       "Bash(git stash list *)",
+      "Bash(git -C * status *)",
+      "Bash(git -C * log *)",
+      "Bash(git -C * diff *)",
+      "Bash(git -C * fetch *)",
+      "Bash(git -C * branch *)",
+      "Bash(git -C * show *)",
+      "Bash(git -C * check-ignore *)",
+      "Bash(git -C * worktree *)",
+      "Bash(git -C * worktree list *)",
+      "Bash(git -C * worktree add *)",
+      "Bash(git -C * remote *)",
+      "Bash(git -C * blame *)",
+      "Bash(git -C * rev-parse *)",
+      "Bash(git -C * stash list *)",
       "Bash(gh pr view *)",
       "Bash(gh pr list *)",
       "Bash(gh pr status *)",
@@ -99,8 +115,11 @@
       "Bash(uuidgen *)",
       "Bash(bun */mirugit/scripts/*)",
       "Bash(pkill -f mirugit*)",
+      "Bash(curl * http://127.0.0.1:19556/*)",
       "Read(*/.mirugit/*)",
       "Write(*/.mirugit/*)",
+      "Edit(*/.mirugit/*)",
+      "Glob(*/mirugit/*)",
       "Bash(copilot *レビュー*)",
       "Skill(example-skills:skill-creator)",
       "Skill(superpowers:using-git-worktrees)",
@@ -108,7 +127,10 @@
       "Skill(dig:dig)",
       "mcp__plugin_context7_context7__query-docs",
       "mcp__plugin_context7_context7__resolve-library-id",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(bun test:*)",
+      "Bash(npm search:*)",
+      "Bash(screenshot-capture:*)"
     ],
     "deny": [
       "Bash(rm -rf / *)",
@@ -124,6 +146,20 @@
       "Bash(gh pr create *)",
       "Bash(rm *)",
       "Bash(gh api *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(gh api *)",
+            "command": "jq -r '.tool_input.command' | { read -r cmd; if echo \"$cmd\" | grep -qE -- '-X[[:space:]]*GET|--method[[:space:]]+GET'; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"gh api GET (explicit)\"}}'; elif echo \"$cmd\" | grep -qE -- '[[:space:]]-(f|F)[[:space:]]|[[:space:]]--input[[:space:]]|[[:space:]]-X[[:space:]]|[[:space:]]--method[[:space:]]'; then echo '{}'; else echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"gh api GET (default)\"}}'; fi; }"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
@@ -145,6 +181,8 @@
     "hookify@claude-plugins-official": true
   },
   "language": "Japanese",
+  "tui": "fullscreen",
+  "skipAutoPermissionPrompt": true,
   "voiceEnabled": true,
   "voice": {
     "enabled": true,

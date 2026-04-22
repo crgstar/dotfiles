@@ -130,8 +130,7 @@
       "Bash(mkdir:*)",
       "Bash(bun test:*)",
       "Bash(npm search:*)",
-      "Bash(screenshot-capture:*)",
-      "Bash(gh api *)"
+      "Bash(screenshot-capture:*)"
     ],
     "deny": [
       "Bash(rm -rf / *)",
@@ -145,18 +144,19 @@
       "Bash(git commit *)",
       "Bash(git push *)",
       "Bash(gh pr create *)",
-      "Bash(rm *)"
+      "Bash(rm *)",
+      "Bash(gh api *)"
     ]
   },
   "hooks": {
-    "PreToolUse": [
+    "PermissionRequest": [
       {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
             "if": "Bash(gh api *)",
-            "command": "jq -r '.tool_input.command' | { read -r cmd; if echo \"$cmd\" | grep -qE -- '[[:space:]]-(f|F)[[:space:]]|[[:space:]]--input[[:space:]]|[[:space:]]-X[[:space:]]|[[:space:]]--method[[:space:]]'; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"gh api write detected\"}}'; else echo '{}'; fi; }"
+            "command": "jq -r '.tool_input.command' | { read -r cmd; if echo \"$cmd\" | grep -qE -- '[[:space:]]-(f|F)[[:space:]]|[[:space:]]--input[[:space:]]|[[:space:]]-X[[:space:]]|[[:space:]]--method[[:space:]]'; then echo '{}'; else echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\",\"message\":\"gh api read-only (no write flags)\"}}}'; fi; }"
           }
         ]
       }

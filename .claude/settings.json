@@ -96,6 +96,7 @@
       "WebFetch(domain:developer.apple.com)",
       "Bash(env)",
       "Bash(echo *)",
+      "Bash(printf *)",
       "Bash(open *)",
       "Bash(date *)",
       "Bash(uname *)",

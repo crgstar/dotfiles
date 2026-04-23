@@ -275,6 +275,8 @@ link_file "$claude_src" "$HOME/.claude/CLAUDE.md"
 
 link_file "$DOTFILES_DIR/.claude/skills/docbase-mermaid/SKILL.md" \
           "$HOME/.claude/skills/docbase-mermaid/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/session-feedback/SKILL.md" \
+          "$HOME/.claude/skills/session-feedback/SKILL.md"
 
 # MCP サーバー設定のマージ
 if [ -f "$HOME/.claude.json" ] && command -v jq &> /dev/null; then

@@ -1,5 +1,6 @@
 - askUserQuestionTool を積極的に使うこと
   - ツール一覧(`<functions>`)に無くても system-reminder の deferred tools 欄を確認し、`ToolSearch` でスキーマをロードすれば呼べる
+  - 特に大規模な書き物（ドキュメント・仕様書・設計書）の着手前は、章立て・視点・読者層・スコープを AskUserQuestion で合意してから書き始める
 - ソース中コメントは「why」を優先して書くこと
 - 後方互換が必要と判断する前に、ユーザに問い合わせて確認すること
 - CQS/CQRS を意識し、Query（判断・計算）は純粋関数に分離して積極的にテストを書くこと

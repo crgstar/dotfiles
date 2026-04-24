@@ -1,0 +1,82 @@
+#!/bin/bash
+# Why: DisplayLink Manager は個別ディスプレイ on/off の公式 CLI を提供していないため、
+#      ユーザーエージェントごと終了→再起動して DisplayLink 経由の外部ディスプレイ出力を
+#      一括リセットする。
+#      ただし「外部ディスプレイが消えた」の多くは USB 列挙失敗が原因で、この場合は
+#      アプリ再起動では復帰しない。事前に USB 列挙状態を確認し、DisplayLink デバイスが
+#      見えていない場合は USB 抜き差しを促して early exit する。
+set -euo pipefail
+
+APP="DisplayLink Manager"
+# Why: アプリ名は "DisplayLink Manager" だが実プロセス名は DisplayLinkUserAgent。
+PROC="DisplayLinkUserAgent"
+# Why: Synaptics/DisplayLink の USB Vendor ID (0x17e9 = 6121)。ioreg で列挙判定に使う。
+DL_VENDOR_ID=6121
+
+SLEEP_SEC=2
+FORCE=0
+
+usage() {
+  cat <<USAGE
+Usage: displaylink-restart [options]
+  DisplayLink Manager を再起動して出力をリセットする。
+
+  -f, --force       USB に DisplayLink デバイスが見えなくても強制実行
+      --sleep SEC   quit 後および計測前の待機秒数 (default: 2)
+  -h, --help        このヘルプ
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -f|--force) FORCE=1; shift ;;
+    --sleep)
+      [[ $# -ge 2 ]] || { echo "--sleep requires a value" >&2; usage >&2; exit 2; }
+      SLEEP_SEC="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+count_dl_usb() {
+  ioreg -p IOUSB -l -w0 2>/dev/null | grep -c "\"idVendor\" = ${DL_VENDOR_ID}" || true
+}
+
+count_displays() {
+  system_profiler SPDisplaysDataType 2>/dev/null | grep -c "^[[:space:]]*Resolution:" || true
+}
+
+before_usb=$(count_dl_usb)
+before_disp=$(count_displays)
+printf "before: DisplayLink USB=%d, displays=%d\n" "$before_usb" "$before_disp"
+
+if [[ "$before_usb" -eq 0 && "$FORCE" -ne 1 ]]; then
+  cat >&2 <<MSG
+[displaylink-restart] USB に DisplayLink デバイスが列挙されていません。
+  先に USB ケーブルの抜き差しを試してください。
+  それでもアプリを再起動したい場合は: displaylink-restart --force
+MSG
+  exit 1
+fi
+
+if pgrep -x "$PROC" >/dev/null; then
+  osascript -e "quit app \"$APP\"" >/dev/null 2>&1 || true
+  # Why: quit は非同期で完了するため、プロセス消失を最大 5s 待つ
+  for _ in $(seq 1 10); do
+    pgrep -x "$PROC" >/dev/null || break
+    sleep 0.5
+  done
+fi
+open -a "$APP"
+
+# Why: 起動直後は DisplayLink が USB 再列挙中なので、計測前に待つ
+sleep "$SLEEP_SEC"
+after_usb=$(count_dl_usb)
+after_disp=$(count_displays)
+printf "after:  DisplayLink USB=%d, displays=%d\n" "$after_usb" "$after_disp"
+
+if [[ "$after_disp" -lt "$before_disp" ]]; then
+  echo "[displaylink-restart] ディスプレイ数が減りました。USB 抜き差しを試してください。" >&2
+elif [[ "$after_disp" -eq "$before_disp" && "$before_usb" -gt 0 ]]; then
+  echo "[displaylink-restart] ディスプレイ数に変化なし。まだ出ないときは USB 抜き差しを試してください。" >&2
+fi

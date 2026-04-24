@@ -186,6 +186,11 @@ else
 fi
 link_file "$ghostty_src" "$HOME/.config/ghostty/config"
 
+# ----- bin -----
+
+link_file "$DOTFILES_DIR/bin/displaylink-restart" \
+          "$HOME/.local/bin/displaylink-restart"
+
 # ----- Shell -----
 
 link_file "$DOTFILES_DIR/.zshrc" \

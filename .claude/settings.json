@@ -181,21 +181,6 @@
             "type": "command",
             "if": "Bash(gh api *)",
             "command": "jq -r '.tool_input.command' | { read -r cmd; if echo \"$cmd\" | grep -qE -- '[[:space:]]-(f|F)[[:space:]]|[[:space:]]--input[[:space:]]|[[:space:]]-X[[:space:]]|[[:space:]]--method[[:space:]]'; then echo '{}'; else echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\",\"message\":\"gh api read-only (no write flags)\"}}}'; fi; }"
-          },
-          {
-            "type": "command",
-            "if": "Bash(git add *)",
-            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\"}}}'"
-          },
-          {
-            "type": "command",
-            "if": "Bash(git commit *)",
-            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\"}}}'"
-          },
-          {
-            "type": "command",
-            "if": "Bash(git push *)",
-            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\"}}}'"
           }
         ]
       }
@@ -226,5 +211,6 @@
   "voice": {
     "enabled": true,
     "mode": "hold"
-  }
+  },
+  "theme": "dark-ansi"
 }

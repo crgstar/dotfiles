@@ -180,7 +180,7 @@
           {
             "type": "command",
             "if": "Bash(gh api *)",
-            "command": "jq -r '.tool_input.command' | { read -r cmd; if echo \"$cmd\" | grep -qE -- '[[:space:]]-(f|F)[[:space:]]|[[:space:]]--input[[:space:]]|[[:space:]]-X[[:space:]]|[[:space:]]--method[[:space:]]'; then echo '{}'; else echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\",\"message\":\"gh api read-only (no write flags)\"}}}'; fi; }"
+            "command": "jq -r '.tool_input.command' | { read -r cmd; case \"$cmd\" in \"gh api \"*) ;; *) echo '{}'; exit 0 ;; esac; if echo \"$cmd\" | grep -qE -- '[[:space:]]-(f|F)[[:space:]]|[[:space:]]--input[[:space:]]|[[:space:]]-X[[:space:]]|[[:space:]]--method[[:space:]]'; then echo '{}'; else echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"allow\",\"message\":\"gh api read-only (no write flags)\"}}}'; fi; }"
           }
         ]
       }

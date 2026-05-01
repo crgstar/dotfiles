@@ -151,7 +151,8 @@
       "Bash(mkdir:*)",
       "Bash(bun test:*)",
       "Bash(npm search:*)",
-      "Bash(screenshot-capture:*)"
+      "Bash(screenshot-capture:*)",
+      "Bash(session-feedback-extract:*)"
     ],
     "deny": [
       "Bash(rm -rf / *)",

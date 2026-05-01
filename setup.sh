@@ -191,6 +191,11 @@ link_file "$ghostty_src" "$HOME/.config/ghostty/config"
 link_file "$DOTFILES_DIR/bin/displaylink-restart" \
           "$HOME/.local/bin/displaylink-restart"
 
+# why: スキル本文から "session-feedback-extract" の短縮名で呼べるようにし、
+#      Bash(session-feedback-extract:*) の allow ルールだけで権限ダイアログを抑える
+link_file "$DOTFILES_DIR/.claude/skills/session-feedback/extract.sh" \
+          "$HOME/.local/bin/session-feedback-extract"
+
 # ----- Shell -----
 
 link_file "$DOTFILES_DIR/.zshrc" \

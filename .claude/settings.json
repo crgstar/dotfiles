@@ -180,8 +180,8 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(gh api *)",
-            "command": "bash $HOME/.claude/hooks/segment-allow.sh"
+            "command": "bash $HOME/.claude/hooks/segment-allow.sh",
+            "if": "Bash(gh api *)"
           }
         ]
       }
@@ -194,22 +194,24 @@
   },
   "enabledPlugins": {
     "context7@claude-plugins-official": true,
-    "example-skills@anthropic-agent-skills": true,
+    "example-skills@anthropic-agent-skills": false,
     "superpowers@superpowers-marketplace": true,
     "dig@kuu-marketplace": true,
-    "code-simplifier@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": false,
     "code-review@claude-plugins-official": true,
     "feature-dev@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
-    "hookify@claude-plugins-official": true
+    "hookify@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true
   },
   "language": "Japanese",
   "tui": "fullscreen",
-  "skipAutoPermissionPrompt": true,
-  "voiceEnabled": true,
   "voice": {
     "enabled": true,
     "mode": "hold"
   },
-  "theme": "dark-ansi"
+  "theme": "dark-ansi",
+  "skipAutoPermissionPrompt": true,
+  "voiceEnabled": true
 }

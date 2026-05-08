@@ -5,7 +5,14 @@ argument-hint: "[partial <引き継ぐ範囲>] | <次セッションの焦点>"
 disable-model-invocation: true
 ---
 
-会話を要約した引き継ぎ書を書き、`mktemp -t baton-XXXXXX.md`（partial モードでは `mktemp -t baton-partial-XXXXXX.md`）で生成したパスに保存する。
+会話を要約した引き継ぎ書を書き、以下で生成した `$f.md` に保存する。
+
+```sh
+mkdir -p "$HOME/.local/state/baton"
+ctx=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
+f=$(mktemp "$HOME/.local/state/baton/baton-${ctx}-XXXXXX") && mv "$f" "$f.md"
+# partial モードでは baton-partial-${ctx}-XXXXXX を使う
+```
 
 PRD・plan・ADR・issue・commit・diff など、既に他の成果物に書かれている内容は本文に転写しない。パスや URL で参照する。
 

@@ -134,6 +134,8 @@
       "Write(*/.mirugit/*)",
       "Edit(*/.mirugit/*)",
       "Glob(*/mirugit/*)",
+      "Glob(*/.claude/*)",
+      "Grep(*/.claude/*)",
       "Bash(copilot *レビュー*)",
       "Bash(copilot --version*)",
       "Bash(copilot --help*)",
@@ -152,7 +154,11 @@
       "Bash(bun test:*)",
       "Bash(npm search:*)",
       "Bash(screenshot-capture:*)",
-      "Bash(session-feedback-extract:*)"
+      "Bash(session-feedback-extract:*)",
+      "Bash(*/.claude/skills/*/run.sh*)",
+      "Bash(*/.claude/skills/*/scripts/*)",
+      "Bash(bash */.claude/skills/*)",
+      "Bash(sh */.claude/skills/*)"
     ],
     "deny": [
       "Bash(rm -rf / *)",
@@ -170,7 +176,8 @@
       "Bash(gh api *)"
     ],
     "additionalDirectories": [
-      "~/.mirugit"
+      "~/.mirugit",
+      "~/.claude"
     ]
   },
   "hooks": {
@@ -213,5 +220,7 @@
   },
   "theme": "dark-ansi",
   "skipAutoPermissionPrompt": true,
-  "voiceEnabled": true
+  "voiceEnabled": true,
+  "autoMemoryEnabled": true,
+  "verbose": false
 }

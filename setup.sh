@@ -289,6 +289,10 @@ link_file "$DOTFILES_DIR/.claude/skills/session-feedback/SKILL.md" \
           "$HOME/.claude/skills/session-feedback/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/baton/SKILL.md" \
           "$HOME/.claude/skills/baton/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/SKILL.md" \
+          "$HOME/.claude/skills/add-dir-manager/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/scripts/addir.sh" \
+          "$HOME/.claude/skills/add-dir-manager/scripts/addir.sh"
 
 link_file "$DOTFILES_DIR/.claude/hooks/segment-allow.sh" \
           "$HOME/.claude/hooks/segment-allow.sh"

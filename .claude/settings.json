@@ -151,6 +151,7 @@
       "mcp__plugin_context7_context7__query-docs",
       "mcp__plugin_context7_context7__resolve-library-id",
       "Bash(mkdir:*)",
+      "Bash(mkdir -p \"$HOME/.local/state/baton\"*)",
       "Bash(bun test:*)",
       "Bash(npm search:*)",
       "Bash(screenshot-capture:*)",

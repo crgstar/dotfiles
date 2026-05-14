@@ -5,3 +5,5 @@
 .claude/settings.local.json
 ghostty/config.merged
 docs.local/
+.worktrees/
+.claude/worktrees/

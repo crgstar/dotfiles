@@ -294,6 +294,12 @@ link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/SKILL.md" \
 link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/scripts/addir.sh" \
           "$HOME/.claude/skills/add-dir-manager/scripts/addir.sh"
 
+# work 環境専用スキル (PR 作成ワークフローは work リポジトリの規約前提)
+if [ "$HOST_ENV" = "work" ]; then
+  link_file "$DOTFILES_DIR/.claude/skills/create-pr/SKILL.md" \
+            "$HOME/.claude/skills/create-pr/SKILL.md"
+fi
+
 link_file "$DOTFILES_DIR/.claude/hooks/segment-allow.sh" \
           "$HOME/.claude/hooks/segment-allow.sh"
 

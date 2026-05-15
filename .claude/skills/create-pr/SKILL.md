@@ -1,30 +1,44 @@
 ---
 name: create-pr
 description: >
-  PR 作成時は常に発動する。「PR作って」「PR上げて」「PR出して」「create-pr」
-  「プルリク作成して」「gh pr create して」「この差分でPR」等のリクエストや、
-  コミット直後にユーザが「上げる」「出す」と言ったときに必ず使うこと。
+  PR 本文 (タイトル + body) を考えるときは常に発動する。「PR作って」「PR上げて」
+  「PR出して」「create-pr」「プルリク作成して」「gh pr create して」「この差分でPR」
+  「PR の文面考えて」等のリクエストや、コミット直後にユーザが「PR作成」と
+  言ったときに必ず使うこと。PR 本文の下書きレビューや書き換え相談でも発動する。
+  ただし、push だけ・差分の相談だけのときは対象外。
 ---
 
 # Create PR Workflow
 
 ## Phase 1: ブランチと差分の確認
 
-- PR を作るブランチは **現在のブランチがデフォルト**。ユーザから別ブランチの指示があれば変更する。`main` / `master` 上ならどのブランチで作るかをユーザに確認する。
+- PR を作るブランチ (head) は **現在のブランチがデフォルト**。ユーザから別ブランチの指示があれば変更する。default branch 上ならどのブランチで作るかをユーザに確認する。
+- base ブランチはリポジトリの default branch を既定とする。最初に取得して **ユーザに「base は X で進めます」と報告** する (リポによって `main` / `master` / `develop` 等が違うため):
+  ```bash
+  BASE=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+  ```
 - 並列実行:
   ```bash
   git status
-  git log --oneline main..HEAD
-  git diff main...HEAD --stat
-  git diff main...HEAD
+  git log --oneline "$BASE"..HEAD
+  git diff "$BASE"...HEAD --stat
+  git diff "$BASE"...HEAD
   ```
 - 未コミット変更があれば、含めて commit するか stash するかをユーザに確認する。`git add -A` は使わない。
 
-## Phase 2: タイトル生成
+## Phase 2: 既存 PR から慣習を把握
 
-- 70 文字以内。長い説明は本文へ落とす。
+直近マージ済み PR を見て、このリポジトリの書式の慣習を読み取る:
+
+```bash
+gh pr list --state merged --limit 5 --json title,body
+```
+
+PR が無いリポジトリでは `.github/pull_request_template.md` と CLAUDE.md を参照する。両方無ければ Phase 3 のデフォルトカタログで進める。
 
 ## Phase 3: 本文を section catalog から組み立てる
+
+Phase 2 で抽出した規約 (言語・セクション構成) を優先する。規約に無い場合は次のカタログから必要なものだけ選ぶ:
 
 | セクション | 必須 | いつ入れるか | 中身 |
 |----------|----|------------|------|

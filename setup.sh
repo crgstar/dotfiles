@@ -296,6 +296,9 @@ link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/SKILL.md" \
           "$HOME/.claude/skills/add-dir-manager/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/scripts/addir.sh" \
           "$HOME/.claude/skills/add-dir-manager/scripts/addir.sh"
+link_file "$DOTFILES_DIR/.claude/skills/skill-md-guide/SKILL.md" \
+          "$HOME/.claude/skills/skill-md-guide/SKILL.md"
+
 # why: mattpocock/skills は第三者リポなので dotfiles に取り込まず、
 #      XDG_DATA_HOME 配下に shallow clone してから symlink で配る。
 #      npx skills@latest installer を経由しないので claude-code 専用に閉じる。

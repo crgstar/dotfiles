@@ -96,7 +96,10 @@ link_file() {
       return
     fi
     echo "relink: $dest"
-    ln -sf "$src" "$dest"
+    # why: BSD ln (macOS) は dest がディレクトリ symlink の場合 -sf でも
+    #      リンク先の中に新規 symlink を作ってしまう。-n (--no-dereference)
+    #      で dest を「symlink そのもの」として扱わせる必要がある。
+    ln -sfn "$src" "$dest"
 
   elif [ -e "$dest" ]; then
     if diff -u "$src" "$dest" > /dev/null 2>&1; then
@@ -293,6 +296,23 @@ link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/SKILL.md" \
           "$HOME/.claude/skills/add-dir-manager/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/scripts/addir.sh" \
           "$HOME/.claude/skills/add-dir-manager/scripts/addir.sh"
+# why: mattpocock/skills は第三者リポなので dotfiles に取り込まず、
+#      XDG_DATA_HOME 配下に shallow clone してから symlink で配る。
+#      npx skills@latest installer を経由しないので claude-code 専用に閉じる。
+MP_SKILLS_DIR="$HOME/.local/share/mattpocock-skills"
+if [ -d "$MP_SKILLS_DIR/.git" ]; then
+  git -C "$MP_SKILLS_DIR" pull --ff-only --quiet
+  echo "updated: $MP_SKILLS_DIR"
+else
+  mkdir -p "$(dirname "$MP_SKILLS_DIR")"
+  git clone --depth 1 https://github.com/mattpocock/skills.git "$MP_SKILLS_DIR"
+fi
+# why: grill-with-docs の SKILL.md は CONTEXT-FORMAT.md / ADR-FORMAT.md を
+#      相対パスで参照するので、ファイル単位ではなくディレクトリごとリンクする。
+link_file "$MP_SKILLS_DIR/skills/productivity/grill-me" \
+          "$HOME/.claude/skills/grill-me"
+link_file "$MP_SKILLS_DIR/skills/engineering/grill-with-docs" \
+          "$HOME/.claude/skills/grill-with-docs"
 
 # work 環境専用スキル (PR 作成ワークフローは work リポジトリの規約前提)
 if [ "$HOST_ENV" = "work" ]; then

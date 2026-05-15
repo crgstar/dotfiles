@@ -298,6 +298,12 @@ link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/scripts/addir.sh" \
           "$HOME/.claude/skills/add-dir-manager/scripts/addir.sh"
 link_file "$DOTFILES_DIR/.claude/skills/skill-md-guide/SKILL.md" \
           "$HOME/.claude/skills/skill-md-guide/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/claude-md-guide/SKILL.md" \
+          "$HOME/.claude/skills/claude-md-guide/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/claude-md-guide/references/anti-patterns.md" \
+          "$HOME/.claude/skills/claude-md-guide/references/anti-patterns.md"
+link_file "$DOTFILES_DIR/.claude/skills/claude-md-guide/references/examples.md" \
+          "$HOME/.claude/skills/claude-md-guide/references/examples.md"
 
 # why: mattpocock/skills は第三者リポなので dotfiles に取り込まず、
 #      XDG_DATA_HOME 配下に shallow clone してから symlink で配る。

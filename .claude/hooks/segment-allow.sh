@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # PermissionRequest hook helper:
 # Bash の複合コマンドを &&/||/;/| で分割し、各セグメントが
-# safe-prefix（echo / printf / gh api(書き込みフラグなし)）に
-# 該当するときだけ allow を返す。1 つでも該当しないセグメントが
-# あれば `{}` を返して静的ルールに委譲する。
+# safe-prefix に該当するときだけ allow を返す。1 つでも該当しない
+# セグメントがあれば `{}` を返して静的ルールに委譲する。
 #
 # Why segments instead of prefix-only:
 #   現行フックは「コマンド先頭が gh api か」しか見ていないため、
@@ -12,9 +11,17 @@
 #   のような不正連結も通ってしまう。各セグメントを safe-prefix に
 #   照合することで両立する。
 #
+# Why the safe-prefix list is generated, not hardcoded:
+#   静的 allow の `Bash(<cmd> *)` を変えるたびに hook の許容範囲も
+#   同期させたいが、手で 2 箇所メンテすると必ずズレる。setup.sh が
+#   settings.json から `Bash(<word>)` / `Bash(<word> *)` の単純パターン
+#   だけを抽出して `segment-allow.prefixes` に書き出すことで、
+#   静的 allow ⊇ hook 許容範囲 を build-time に保証する。
+#   `git -C * status *` のような複合パターンは抽出から除外している。
+#
 # Scope: gh api の auto-allow を担うフックでのみ使用する想定。
-# echo/printf 単独や jq 単独は静的 allow に委譲し、ここでは
-# auto-allow しない（このフックは gh api を含む経路でのみ発火する）。
+# どんなに safe-prefix を満たしていても `gh api` を 1 つも含まない
+# コマンドは passthrough し、静的ルールの ask 判定に委ねる。
 #
 # Usage:
 #   1) フック本体: stdin に Claude Code が渡す JSON を受け取り、
@@ -22,6 +29,27 @@
 #   2) セルフテスト: `bash segment-allow.sh --self-test`
 
 set -euo pipefail
+
+# build-time に setup.sh が生成する safe-prefix リスト。1 行 1 パターンで、
+# 各行は bash の glob として `[[ "$seg" == $pattern ]]` で照合される。
+# ファイルが無い場合は echo / printf / jq の最小セットへフォールバックし、
+# setup.sh 未実行の状態でも壊れないようにする。
+SAFE_PREFIX_FILE="${SAFE_PREFIX_FILE:-$HOME/.claude/hooks/segment-allow.prefixes}"
+
+# 安全プレフィクスを配列に読み込む。コメント行 (# で始まる) と空行は無視。
+load_safe_prefixes() {
+  SAFE_PREFIXES=()
+  if [ -r "$SAFE_PREFIX_FILE" ]; then
+    local line
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      case "$line" in '#'*) continue ;; esac
+      SAFE_PREFIXES+=("$line")
+    done < "$SAFE_PREFIX_FILE"
+  else
+    SAFE_PREFIXES=('echo' 'echo *' 'printf' 'printf *' 'jq *')
+  fi
+}
 
 # セグメントの前後空白を取り除く
 trim() {
@@ -113,25 +141,31 @@ is_safe_segment() {
   local seg="$1"
   [ -z "$seg" ] && return 1
 
+  # gh api だけは「書き込みフラグの有無」を見るため特別扱い。
+  # 静的 allow には Bash(gh api *) が無い前提で、hook が auto-allow の責務を負う。
+  #   -f / -F     : フィールド送信（POST 等）
+  #   --input     : ファイル/標準入力ボディ
+  #   -X / --method: HTTP メソッド明示指定
+  # 末尾アンカーに `=` を含めるのは `--method=POST` 形式も拾うため。
   case "$seg" in
-    'echo'|'echo '*|'printf'|'printf '*)
-      return 0
-      ;;
     'gh api '*)
-      # 書き込みフラグ:
-      #   -f / -F     : フィールド送信（POST 等）
-      #   --input     : ファイル/標準入力ボディ
-      #   -X / --method: HTTP メソッド明示指定
-      # 末尾アンカーに `=` を含めるのは `--method=POST` 形式も拾うため。
       if [[ "$seg" =~ (^|[[:space:]])(-(f|F)|--input|-X|--method)([[:space:]]|$|=) ]]; then
         return 1
       fi
       return 0
       ;;
-    *)
-      return 1
-      ;;
   esac
+
+  # それ以外は generated prefix list に対する glob match で判定。
+  # `[[ ]]` 内は word-splitting されないので $pattern を unquoted にして OK。
+  local pattern
+  for pattern in "${SAFE_PREFIXES[@]}"; do
+    if [[ "$seg" == $pattern ]]; then
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 # コマンド全体を分解し、全セグメント safe かつ gh api を含むときだけ allow。
@@ -140,6 +174,12 @@ evaluate_command() {
   local cmd="$1"
   local has_gh_api=0
   local seg
+
+  # SAFE_PREFIXES が未設定ならファイルから読む。self-test が事前に
+  # 配列を仕込んでいる場合はそれを尊重する。
+  if [ -z "${SAFE_PREFIXES+x}" ]; then
+    load_safe_prefixes
+  fi
 
   while IFS= read -r seg; do
     if ! is_safe_segment "$seg"; then
@@ -154,7 +194,7 @@ evaluate_command() {
 }
 
 emit_allow() {
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","message":"compound read-only: echo/printf/gh api(no write flags)"}}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","message":"compound read-only: gh api (no write flags) + segments in safe-prefix list"}}}'
 }
 
 emit_passthrough() {
@@ -175,6 +215,32 @@ main() {
 # テストは判定の純粋関数 evaluate_command に対して行う。
 # `bash segment-allow.sh --self-test` で実行できる。
 run_self_test() {
+  # self-test は本物の prefix ファイルに依存させない。setup.sh が生成する
+  # 想定リストの代表例を直接配列に入れてテストする。
+  SAFE_PREFIXES=(
+    'echo'
+    'echo *'
+    'printf'
+    'printf *'
+    'jq *'
+    'head *'
+    'tail *'
+    'grep *'
+    'wc *'
+    'ls *'
+    'cat *'
+    'env'
+    # 多語サブコマンド (Bash(git status *) 等の派生)
+    'git status *'
+    'git log *'
+    'gh pr view *'
+    # `:*` セマンティクス → "cmd" と "cmd *" の両方を派生させる
+    'mkdir'
+    'mkdir *'
+    'bun test'
+    'bun test *'
+  )
+
   local fail=0
   assert_safe() {
     local label="$1" cmd="$2"
@@ -205,6 +271,18 @@ run_self_test() {
   assert_safe '--jq オプション付き' "gh api repos/foo/bar/pulls/1 --jq '.title'"
   assert_safe 'bare echo' 'echo && gh api repos/foo/bar/pulls/1'
   assert_safe 'バックスラッシュ偶数個 (\\\\)' 'echo "a\\\\" && gh api repos/foo/bar/pulls/1'
+  assert_safe 'gh api | jq' "gh api repos/foo/bar/pulls/1/comments | jq '.[] | .id'"
+  assert_safe 'gh api | jq -r' "gh api repos/foo/bar/pulls/1 | jq -r '.title'"
+  assert_safe 'gh api | head' 'gh api repos/foo/bar/pulls/1 | head -5'
+  assert_safe 'gh api | jq | head' "gh api repos/foo/bar/pulls/1 | jq '.[]' | head -5"
+  assert_safe 'gh api | wc -l' 'gh api repos/foo/bar/pulls/1 | wc -l'
+  assert_safe 'env (引数なし) を含む' 'env && gh api repos/foo/bar/pulls/1'
+  assert_safe 'gh api && git status' 'gh api repos/foo/bar/pulls/1 && git status -s'
+  assert_safe 'gh api && gh pr view' 'gh api repos/foo/bar/pulls/1 && gh pr view 42'
+  assert_safe 'mkdir (引数なし :* 由来)' 'mkdir && gh api repos/foo/bar/pulls/1'
+  assert_safe 'mkdir 引数あり (:* 由来)' 'mkdir -p /tmp/foo && gh api repos/foo/bar/pulls/1'
+  assert_safe 'bun test (引数なし :* 由来)' 'bun test && gh api repos/foo/bar/pulls/1'
+  assert_safe 'bun test 引数あり (:* 由来)' 'bun test --watch && gh api repos/foo/bar/pulls/1'
 
   # unsafe ケース
   assert_unsafe 'rm -rf を含む' 'rm -rf /tmp/foo && gh api repos/foo/bar/pulls/1'
@@ -217,6 +295,12 @@ run_self_test() {
   assert_unsafe 'gh api を含まない（役割外）' 'echo hello && ls -la'
   assert_unsafe 'unknown コマンド単発' 'curl http://example.com'
   assert_unsafe 'パイプで rm' 'gh api repos/foo/bar/pulls/1 | rm -rf /tmp/x'
+  assert_unsafe 'jq 単独（gh api を含まない）' "echo '{}' | jq '.x'"
+  assert_unsafe 'safe-prefix 外の sed' 'gh api repos/foo/bar/pulls/1 | sed s/a/b/'
+  assert_unsafe 'safe-prefix 外の curl' 'gh api repos/foo/bar/pulls/1 && curl http://example.com'
+  assert_unsafe 'env FOO=bar cmd は引数付きで safe ではない' 'env FOO=bar curl x && gh api repos/foo/bar/pulls/1'
+  assert_unsafe 'git stash (subcommand mismatch)' 'gh api repos/foo/bar/pulls/1 && git stash'
+  assert_unsafe 'gh pr create (write subcommand)' 'gh api repos/foo/bar/pulls/1 && gh pr create -t x'
 
   # split_segments 単体: クォート尊重と空セグメント抑制
   assert_split_count() {

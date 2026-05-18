@@ -193,6 +193,29 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "_tag": "ccstatusline-managed",
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y ccstatusline@latest --hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "_tag": "ccstatusline-managed",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y ccstatusline@latest --hook"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

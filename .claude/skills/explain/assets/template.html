@@ -1,0 +1,325 @@
+<!--
+  HTML 骨格テンプレート for explain スキル
+  これは「出発点」であって絶対ではない。題材に合った見せ方を優先すること。
+
+  典型的な使い方:
+    1. このファイルをコピー先 (.local/<name>.html) に複製
+    2. <title>、ヘッダの <h1> と lede、TOC、<section> を埋める
+    3. CSS は出発点として使う。配色変更・新クラス追加・レイアウト変更は自由
+    4. Mermaid を使う場合は <pre class="mermaid">...</pre> を <section> 内に書く
+       （ノードラベルに [] {} を直接埋めない — Mermaid 10 パーサが落ちる）
+    5. 複数 HTML ドキュメントを束ねる場合は、サイドバー末尾の .crossref を有効化
+    6. 単純な索引・ランディングで TOC が不要なら、nav.toc ごと外しても良い
+-->
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>__タイトル__</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({ startOnLoad: true, securityLevel: 'loose', theme: 'default', themeVariables: { fontFamily: 'inherit' } });
+  </script>
+  <style>
+    :root {
+      --fg: #1f2933;
+      --fg-mute: #52606d;
+      --bg: #fbfbfd;
+      --bg-soft: #f1f3f6;
+      --bg-card: #ffffff;
+      --border: #d8dde3;
+      --accent: #2b6cb0;
+      --accent-soft: #e6f0fb;
+      --code-bg: #f6f8fa;
+      --warn: #b7791f;
+      --warn-bg: #fffaf0;
+      --good: #2f855a;
+      --good-bg: #f0fff4;
+      --info: #2c5282;
+      --info-bg: #ebf8ff;
+      --muted-bg: #f7f9fb;
+      --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      color: var(--fg);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Helvetica Neue", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.75;
+      -webkit-font-smoothing: antialiased;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      max-width: 1180px;
+      margin: 0 auto;
+      gap: 32px;
+      padding: 32px 24px 80px;
+    }
+    nav.toc {
+      position: sticky;
+      top: 24px;
+      align-self: start;
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      font-size: 13.5px;
+      line-height: 1.6;
+      border-right: 1px solid var(--border);
+      padding-right: 16px;
+    }
+    nav.toc h2 {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: var(--fg-mute);
+      text-transform: uppercase;
+      margin: 8px 0 12px;
+    }
+    nav.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: toc; }
+    nav.toc ol li { counter-increment: toc; margin: 4px 0; }
+    nav.toc ol li::before { content: counter(toc) ". "; color: var(--fg-mute); }
+    nav.toc ol ol { padding-left: 14px; counter-reset: sub; }
+    nav.toc ol ol li { counter-increment: sub; }
+    nav.toc ol ol li::before { content: counters(toc, ".") "." counter(sub) " "; color: var(--fg-mute); }
+    nav.toc a { color: var(--fg); text-decoration: none; }
+    nav.toc a:hover { color: var(--accent); text-decoration: underline; }
+    nav.toc .crossref {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      font-size: 12.5px;
+    }
+    nav.toc .crossref a { color: var(--accent); }
+
+    main { min-width: 0; }
+    header.title { margin-bottom: 32px; }
+    header.title .eyebrow {
+      color: var(--fg-mute);
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+    header.title h1 {
+      font-size: 28px;
+      margin: 8px 0 12px;
+      letter-spacing: -0.01em;
+    }
+    header.title p.lede {
+      color: var(--fg-mute);
+      font-size: 16px;
+      line-height: 1.7;
+      max-width: 720px;
+    }
+
+    section { margin: 56px 0; scroll-margin-top: 24px; }
+    section h2 {
+      font-size: 22px;
+      margin: 0 0 8px;
+      letter-spacing: -0.01em;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    section h3 { font-size: 17px; margin: 32px 0 8px; }
+    section h4 {
+      font-size: 14px;
+      margin: 22px 0 4px;
+      color: var(--fg-mute);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    p { margin: 12px 0; }
+    ul, ol { padding-left: 22px; }
+    li { margin: 4px 0; }
+    a { color: var(--accent); }
+
+    code, pre, kbd {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+    }
+    code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      overflow: auto;
+      line-height: 1.55;
+    }
+    pre code { background: transparent; padding: 0; }
+
+    /* 「世間一般」↔「このリポジトリでの使われ方」の 2 カラム対照 */
+    .pair {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0;
+    }
+    .pair .col {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .pair .col h4 {
+      margin: 0 0 8px;
+      font-size: 11.5px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--fg-mute);
+    }
+    .pair .col.left h4 { color: var(--info); }
+    .pair .col.right h4 { color: var(--good); }
+    .pair pre { margin: 0; }
+
+    /* Mermaid 等の図解ブロック */
+    .diagram {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      margin: 16px 0;
+      overflow: auto;
+    }
+    .diagram .caption {
+      color: var(--fg-mute);
+      font-size: 12.5px;
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    @media (max-width: 880px) {
+      .layout { grid-template-columns: 1fr; }
+      nav.toc { position: static; border-right: 0; border-bottom: 1px solid var(--border); padding-right: 0; padding-bottom: 16px; }
+      .pair { grid-template-columns: 1fr; }
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 8px;
+      font-size: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--bg-soft);
+      font-weight: 600;
+      font-size: 12.5px;
+      letter-spacing: 0.02em;
+    }
+    tbody tr:hover { background: var(--muted-bg); }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 12px 16px;
+      margin: 16px 0;
+      border-radius: 0 8px 8px 0;
+      font-size: 14px;
+    }
+    .callout.warn { border-left-color: var(--warn); background: var(--warn-bg); }
+    .callout.good { border-left-color: var(--good); background: var(--good-bg); }
+    .callout.info { border-left-color: var(--info); background: var(--info-bg); }
+    .callout strong { display: block; font-size: 12.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-mute); margin-bottom: 4px; }
+
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      padding: 1px 8px;
+      border-radius: 999px;
+      background: var(--bg-soft);
+      color: var(--fg-mute);
+      vertical-align: middle;
+      margin-left: 6px;
+    }
+
+    footer { color: var(--fg-mute); font-size: 12.5px; margin-top: 64px; text-align: center; }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <nav class="toc">
+    <h2>目次</h2>
+    <ol>
+      <li><a href="#sec-1">__章タイトル 1__</a>
+        <ol>
+          <li><a href="#sec-1-1">__節タイトル__</a></li>
+        </ol>
+      </li>
+      <li><a href="#sec-2">__章タイトル 2__</a></li>
+    </ol>
+    <!-- 複数 HTML を束ねる場合は有効化
+    <div class="crossref">
+      関連: <a href="./other.html">other.html (別ドキュメントの説明)</a>
+    </div>
+    -->
+  </nav>
+
+  <main>
+    <header class="title">
+      <div class="eyebrow">__カテゴリ／プロジェクト名__</div>
+      <h1>__タイトル__</h1>
+      <p class="lede">__このドキュメントの目的・対象読者・読み方を 2〜3 文で要約する__</p>
+    </header>
+
+    <!-- ============================================================ -->
+    <section id="sec-1">
+      <h2>1. __章タイトル 1__</h2>
+
+      <h3 id="sec-1-1">1.1 __節タイトル__</h3>
+      <p>__本文__</p>
+
+      <!-- 対照ブロックの例
+      <div class="pair">
+        <div class="col left">
+          <h4>世間一般</h4>
+          <pre><code>// example</code></pre>
+        </div>
+        <div class="col right">
+          <h4>このリポジトリ</h4>
+          <pre><code>// example</code></pre>
+        </div>
+      </div>
+      -->
+
+      <!-- callout の例
+      <div class="callout">
+        <strong>ポイント</strong>
+        __補足したいこと__
+      </div>
+      -->
+
+      <!-- Mermaid 図の例（メタ文字 [] {} は使わない！）
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+  A["入力"] --> B["処理"]
+  B --> C["出力"]
+        </pre>
+        <div class="caption">図: __図の説明__</div>
+      </div>
+      -->
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="sec-2">
+      <h2>2. __章タイトル 2__</h2>
+      <p>__本文__</p>
+    </section>
+
+    <footer>
+      <p>__フッタ説明__</p>
+    </footer>
+
+  </main>
+</div>
+</body>
+</html>

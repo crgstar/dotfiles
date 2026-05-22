@@ -1,1 +1,1 @@
-- コミット前に /simplify すること
+- コミット前に `/code-review max` すること

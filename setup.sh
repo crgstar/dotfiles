@@ -308,6 +308,8 @@ link_file "$DOTFILES_DIR/.claude/skills/explain/SKILL.md" \
           "$HOME/.claude/skills/explain/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/explain/assets/template.html" \
           "$HOME/.claude/skills/explain/assets/template.html"
+link_file "$DOTFILES_DIR/.claude/skills/write-shared-docs/SKILL.md" \
+          "$HOME/.claude/skills/write-shared-docs/SKILL.md"
 
 # why: mattpocock/skills は第三者リポなので dotfiles に取り込まず、
 #      XDG_DATA_HOME 配下に shallow clone してから symlink で配る。

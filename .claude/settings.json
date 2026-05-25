@@ -178,7 +178,8 @@
     ],
     "additionalDirectories": [
       "~/.mirugit",
-      "~/.claude"
+      "~/.claude",
+      "~/.local/state/baton"
     ]
   },
   "hooks": {

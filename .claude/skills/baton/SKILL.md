@@ -5,14 +5,22 @@ argument-hint: "[partial <引き継ぐ範囲>] | <次セッションの焦点>"
 disable-model-invocation: true
 ---
 
-会話を要約した引き継ぎ書を書き、以下で生成した `$f.md` に保存する。
+会話を要約した引き継ぎ書を Write ツールでファイルに書き込む。
 
-```sh
-mkdir -p "$HOME/.local/state/baton"
-ctx=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")
-f=$(mktemp "$HOME/.local/state/baton/baton-${ctx}-XXXXXX") && mv "$f" "$f.md"
-# partial モードでは baton-partial-${ctx}-XXXXXX を使う
-```
+## 保存先
+
+1. HOME は環境冒頭の primary working directory から取り出す (例: primary が `/Users/foo/repo` なら HOME は `/Users/foo`)。
+2. baton dir を決める:
+   - 既定: `<HOME>/.local/state/baton`
+   - フォールバック: `<HOME>/.claude/settings.json` の `permissions.additionalDirectories` に `~/.local/state/baton` が無ければ `<primary working dir>/.local/baton`
+3. ctx は `git rev-parse --show-toplevel 2>/dev/null || pwd` の出力の末尾セグメント。
+4. stamp は `date +%Y%m%d-%H%M%S` の出力。
+5. file_path:
+   - 通常: `<baton_dir>/baton-<ctx>-<stamp>.md`
+   - partial: `<baton_dir>/baton-partial-<ctx>-<stamp>.md`
+6. Write ツールに `file_path` をリテラル絶対パスで渡し、本文を `content` で直接書く。`~` / `$HOME` / コマンド置換は使わない。
+
+## 本文
 
 PRD・plan・ADR・issue・commit・diff など、既に他の成果物に書かれている内容は本文に転写しない。パスや URL で参照する。
 

@@ -290,6 +290,12 @@ link_file "$DOTFILES_DIR/.claude/skills/docbase-mermaid/SKILL.md" \
           "$HOME/.claude/skills/docbase-mermaid/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/session-feedback/SKILL.md" \
           "$HOME/.claude/skills/session-feedback/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/retro/SKILL.md" \
+          "$HOME/.claude/skills/retro/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/process-retro/SKILL.md" \
+          "$HOME/.claude/skills/process-retro/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/process-retro/references/summary-template.md" \
+          "$HOME/.claude/skills/process-retro/references/summary-template.md"
 link_file "$DOTFILES_DIR/.claude/skills/baton/SKILL.md" \
           "$HOME/.claude/skills/baton/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/SKILL.md" \

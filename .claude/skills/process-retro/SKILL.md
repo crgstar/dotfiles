@@ -38,11 +38,8 @@ retro が立てた `crgstar/dotfiles` の open issue を 1 通ずつ順に処理
 5. **専用ブランチ作成**:
    - `original_branch=$(git rev-parse --abbrev-ref HEAD)` (実行末尾のクリーンアップ用に保存)
    - `branch_name=process-retro-$(date +%Y%m%d-%H%M%S)`
-   - 既存の `process-retro-*` ブランチをリモートから取り込む:
-     `git fetch origin 'refs/heads/process-retro-*:refs/heads/process-retro-*' 2>/dev/null || true`
-   - `base=$(git for-each-ref --sort=-refname 'refs/heads/process-retro-*' --format='%(refname:short)' | head -n1)`
-     (命名規約が時系列順なので refname sort で最新が取れる)
-   - `base` が空なら `base=$original_branch` にフォールバック
+   - `git fetch origin main 2>/dev/null || true` (ローカル main の stale を避けるため必ず fetch する)
+   - `base=origin/main` — fetch 失敗等で参照できなければ `base=$original_branch` にフォールバック
    - `git switch -c "$branch_name" "$base"` — 失敗なら中断
    - `commit_count=0` を初期化 (実行末尾でこの値が 0 ならブランチを削除する)
 6. **TodoWrite の Phase Rows** を 1 回で登録:

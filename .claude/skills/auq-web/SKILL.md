@@ -102,6 +102,11 @@ Monitor で polling する必要はない。
 は inline `style` で上書きしてよいが、**毎回フルで配色を書かない** が原則。使えるタグの
 全リストは `references/input-format.md` §9。
 
+**比較対象が 2 つなら左右に並べる**。縦積みより視線移動が短く、行ごとの差分が一目で
+分かるため。比較軸を行にできるなら素の `<table>` の 2 列 (左右の見出しに対象名) が一番楽。
+before/after コードや SVG などセルに収まらないリッチな本文は
+`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">` で左右に置く。
+
 `kind` は 3 種類:
 
 - `single`: ラジオ。`options[]` で `value`/`label`/`hint?`、`allowOther?`

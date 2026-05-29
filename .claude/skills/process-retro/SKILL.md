@@ -140,11 +140,11 @@ retro 側の出力スキーマ:
 
 指摘ごとの手順:
 
-#### (a) skill-md-guide の助言で反映
+#### (a) skill-md-guide に沿って編集
 
-`Skill` ツールで `skill-md-guide` を invoke し、返ってきた助言に従って main が Edit する (skill-md-guide 自身は編集権限を持たない)。
+`Skill` ツールで `skill-md-guide` を invoke し、手順通りに編集、レビューさせる
 
-#### (b) レビュー
+#### (b) サニタイズ レビュー
 
 `Agent` ツール (`subagent_type: general-purpose`) で別コンテキストの subagent を起動し、diff を渡して以下をチェックさせる:
 

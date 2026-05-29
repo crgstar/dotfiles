@@ -14,9 +14,20 @@ set -euo pipefail
 target="${1:-}"
 if [[ -z "$target" ]]; then
   proj_dir="$HOME/.claude/projects/$(printf '%s' "$PWD" | tr '/' '-')"
-  target=$(ls -t "$proj_dir"/*.jsonl 2>/dev/null | head -1 || true)
-  if [[ -z "$target" ]]; then
-    echo "no jsonl under $proj_dir" >&2
+  # Why session-id is the only auto-detection: the project dir accumulates one
+  # jsonl per session (dozens of files), so picking by mtime (`ls -t | head -1`)
+  # silently grabs the wrong transcript whenever a parallel cmux session or a
+  # background routine writes more recently. CLAUDE_CODE_SESSION_ID is set inside
+  # the live session and equals this session's jsonl basename -- the only
+  # deterministic source of truth. No mtime fallback: guessing wrong is worse
+  # than failing loudly, so when the env var is absent we require an explicit $1.
+  if [[ -z "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+    echo "CLAUDE_CODE_SESSION_ID is unset; pass the transcript jsonl path as \$1" >&2
+    exit 1
+  fi
+  target="$proj_dir/$CLAUDE_CODE_SESSION_ID.jsonl"
+  if [[ ! -f "$target" ]]; then
+    echo "no jsonl for current session: $target" >&2
     exit 1
   fi
 fi

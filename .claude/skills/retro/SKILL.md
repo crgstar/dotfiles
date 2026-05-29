@@ -154,8 +154,8 @@ create-pr が、暗号化対象として設定されたファイルの差分を 
 承認されたら本文を**リポジトリ外の一時ファイル**に保存し（`gh api -F body=@` で多行の日本語本文を安全に渡すため）、次で投稿する:
 
 ```bash
-draft=$(mktemp "${TMPDIR:-/tmp/}retro-XXXXXX.md")
-# 承認済み本文を $draft に書き出す
+draft="/tmp/retro-$(date +%Y%m%d-%H%M%S).md"
+# 承認済み本文を $draft に書き出す (Write ツール)
 gh api \
   --method POST \
   /repos/crgstar/dotfiles/issues \

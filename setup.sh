@@ -327,6 +327,27 @@ link_file "$DOTFILES_DIR/.claude/skills/explain/assets/template.html" \
 link_file "$DOTFILES_DIR/.claude/skills/write-shared-docs/SKILL.md" \
           "$HOME/.claude/skills/write-shared-docs/SKILL.md"
 
+# ----- auq-web skill -----
+# why: auq-web は SKILL.md/references (Claude が読むテキスト) を他スキルと同じく
+#   dotfiles で管理し、server 実体は別リポ crgstar/auq-web に置く分割構成。
+#   run.sh は server に sibling 依存するので、リポを単一の正として PATH に通す。
+# 旧構成 (~/.claude/skills/auq-web が repo/skill へのディレクトリ symlink) からの移行:
+#   ファイル単位 link に切り替えるため、残っていれば dir-symlink を除去する。
+[ -L "$HOME/.claude/skills/auq-web" ] && rm "$HOME/.claude/skills/auq-web"
+link_file "$DOTFILES_DIR/.claude/skills/auq-web/SKILL.md" \
+          "$HOME/.claude/skills/auq-web/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/auq-web/references/input-format.md" \
+          "$HOME/.claude/skills/auq-web/references/input-format.md"
+# why: server を起動する run.sh を `auq-web` として PATH に通す (SKILL.md は
+#   `auq-web ...` で呼ぶ)。auq-web リポが無いと壊れた symlink になるので、
+#   存在する時だけ配線する (このリポがある前提)。
+if [ -f "$HOME/projects/auq-web/skill/run.sh" ]; then
+  link_file "$HOME/projects/auq-web/skill/run.sh" "$HOME/.local/bin/auq-web"
+else
+  echo "警告: ~/projects/auq-web が無いため auq-web コマンドは未配線"
+  echo "      git clone git@github.com:crgstar/auq-web.git ~/projects/auq-web"
+fi
+
 # why: mattpocock/skills は第三者リポなので dotfiles に取り込まず、
 #      XDG_DATA_HOME 配下に shallow clone してから symlink で配る。
 #      npx skills@latest installer を経由しないので claude-code 専用に閉じる。

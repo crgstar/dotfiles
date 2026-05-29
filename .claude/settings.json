@@ -156,6 +156,7 @@
       "Bash(npm search:*)",
       "Bash(screenshot-capture:*)",
       "Bash(session-feedback-extract:*)",
+      "Bash(auq-web:*)",
       "Bash(*/.claude/skills/*/run.sh*)",
       "Bash(*/.claude/skills/*/scripts/*)",
       "Bash(bash */.claude/skills/*)",

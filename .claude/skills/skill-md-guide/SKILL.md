@@ -25,5 +25,5 @@ description: >
 
 **適用規模**: 新規スキル作成・3 行以上の変更・手順ロジックの変更は必須。1〜2 行の文言微修正は省略可（省略した場合はその旨を明示する）。
 
-`skill-creator:skill-creator` を invoke した subagent に本ガイドの観点でレビューを依頼する。
+general-purpose の subagent を起動し、その内部で `skill-creator:skill-creator` スキルを invoke して本ガイドの観点でレビューを依頼する（スキル名は `subagent_type` 引数ではなく、subagent 内で Skill ツールを使って呼ぶ）。
 指摘を反映 → 再レビューを最大 3 回。新規指摘が 0 件かつ前周と同じ指摘だけ残るなら収束。3 周で収まらなければ残件をリストでユーザに渡す。

@@ -216,6 +216,17 @@ if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.js
   echo "環境: $HOST_ENV"
 
   if command -v jq &> /dev/null; then
+    # why: common.json は全ローカル env 共通の追加層。base (settings.json) は
+    #      routine がクローン先で project 設定として直読みするため、対話確認用の
+    #      permissions.ask 等は base に置かず common に集約する。routine は setup.sh
+    #      を通らず base だけ読むので ask を受け取らず自律実行でき、ローカルは
+    #      この common 経由で ask を1箇所定義のまま受け取れる (DRY)。
+    #      マージ順は base → common → env で、配列は順に結合される。
+    merge_inputs=("$DOTFILES_DIR/.claude/settings.json")
+    [ -f "$DOTFILES_DIR/.claude/settings.local/common.json" ] \
+      && merge_inputs+=("$DOTFILES_DIR/.claude/settings.local/common.json")
+    merge_inputs+=("$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json")
+
     # jqで設定をマージ（配列は自動的に結合）
     jq -s '
       def merge_with_arrays:
@@ -242,10 +253,9 @@ if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.js
           $b
         end;
 
-      [.[0], .[1]] | merge_with_arrays
+      reduce .[1:][] as $next (.[0]; [., $next] | merge_with_arrays)
     ' \
-      "$DOTFILES_DIR/.claude/settings.json" \
-      "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json" \
+      "${merge_inputs[@]}" \
       > "$DOTFILES_DIR/.claude/settings.merged.json.tmp"
 
     safe_overwrite "$DOTFILES_DIR/.claude/settings.merged.json.tmp" \
@@ -254,7 +264,7 @@ if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.js
     link_file "$DOTFILES_DIR/.claude/settings.merged.json" \
               "$HOME/.claude/settings.json"
 
-    echo "設定をマージしました: settings.json + settings.local/$HOST_ENV.json"
+    echo "設定をマージしました: settings.json + common.json + settings.local/$HOST_ENV.json"
   else
     echo "警告: jqがインストールされていません。設定のマージをスキップします。"
     link_file "$DOTFILES_DIR/.claude/settings.json" \

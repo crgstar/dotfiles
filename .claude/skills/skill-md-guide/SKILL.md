@@ -23,5 +23,6 @@ description: >
 
 ## 書いたら subagent でレビュー
 
-`skill-creator:skill-creator` を invoke した subagent に本ガイドの観点でレビューを依頼する。
+`skill-md-reviewer` サブエージェント（`subagent_type: skill-md-reviewer`）に、レビュー対象 SKILL.md と
+この SKILL.md のフルパスを渡してレビューを依頼する（基準は本ガイドを Read させる。写経しない）。
 指摘を反映 → 再レビューを最大 3 回。新規指摘が 0 件かつ前周と同じ指摘だけ残るなら収束。3 周で収まらなければ残件をリストでユーザに渡す。

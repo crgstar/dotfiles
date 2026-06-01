@@ -1,1 +1,1 @@
-- コミット前に `/code-review max` すること
+- コミット前に `/code-review high --fix` すること

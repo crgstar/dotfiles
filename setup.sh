@@ -306,6 +306,12 @@ link_file "$DOTFILES_DIR/.claude/skills/process-retro/SKILL.md" \
           "$HOME/.claude/skills/process-retro/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/process-retro/references/summary-template.md" \
           "$HOME/.claude/skills/process-retro/references/summary-template.md"
+# why: retro/process-retro が委譲する専用サブエージェント。生ログ隔離 (retro-extractor) と
+#      漏洩監査 (sanitize-auditor) を tools 制限付きで担う。user スコープ (~/.claude/agents) に置く。
+link_file "$DOTFILES_DIR/.claude/agents/retro-extractor.md" \
+          "$HOME/.claude/agents/retro-extractor.md"
+link_file "$DOTFILES_DIR/.claude/agents/sanitize-auditor.md" \
+          "$HOME/.claude/agents/sanitize-auditor.md"
 link_file "$DOTFILES_DIR/.claude/skills/baton/SKILL.md" \
           "$HOME/.claude/skills/baton/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/SKILL.md" \

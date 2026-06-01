@@ -319,6 +319,8 @@ link_file "$DOTFILES_DIR/.claude/agents/skill-md-reviewer.md" \
           "$HOME/.claude/agents/skill-md-reviewer.md"
 link_file "$DOTFILES_DIR/.claude/skills/baton/SKILL.md" \
           "$HOME/.claude/skills/baton/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/read-baton/SKILL.md" \
+          "$HOME/.claude/skills/read-baton/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/SKILL.md" \
           "$HOME/.claude/skills/add-dir-manager/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/scripts/addir.sh" \

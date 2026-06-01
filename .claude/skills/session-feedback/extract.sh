@@ -149,21 +149,28 @@ printf '\n'
 # --- structured question answers -------------------------------------------
 # Why: AskUserQuestion / auq-web の回答はツールブロック内にありモデルが読み飛ばし
 # やすいので verbatim で surface する (どう分類するかは §1.2 の仕事)。
+# Why 出所 (tool_use 名) で判定するか: 回答文を本文に含むだけの tool_result (transcript
+# を読む / diff を出す / レビュー出力など) をテキストマッチすると偽の回答が大量に出る。
+# tool_use_id を name に突合し、AskUserQuestion の回答だけを拾う (denied 節と同手法)。
+# 文言非依存になり "Your questions have been answered" 等の表記揺れも取りこぼさない。
 # AskUserQuestion は preview 付きだと回答文字列に改行が混じり、行分割すると 2 問目
-# 以降が脱落するので改行を潰して 1 行化する。auq-web は行位置でなく JSON 内容
-# (event + answers) で拾う: 回答 JSON は初回 bash 結果か後続 BashOutput poll かで
-# "listening on" 行を伴ったり伴わなかったりするため。
+# 以降が脱落するので改行を潰して 1 行化する。auq-web の回答は Bash 出力なので、その
+# 中から event+answers の JSON 行だけを拾う。
 printf '## structured question answers\n'
 qa=$(jq -rs '
   def tr_text: if type=="array" then (map(.text? // "") | join("\n")) else tostring end;
-  [ .[] | select(.type=="user") | .message.content[]?
-    | select(.type=="tool_result")
-    | (.content | tr_text) as $c
-    | if ($c | test("User has answered your questions"))
-      then ($c | gsub("\n"; " "))
-      else ($c | split("\n")[] | select(test("\"event\"\\s*:\\s*\"answer\".*\"answers\"")))
-      end
-  ]
+  ( [ .[] | select(.type=="assistant") | .message.content[]?
+      | select(.type=="tool_use") | {(.id): .name} ] | add // {} ) as $names
+  | [ .[] | select(.type=="user") | .message.content[]?
+      | select(.type=="tool_result")
+      | $names[.tool_use_id] as $tool
+      | (.content | tr_text) as $c
+      | if $tool == "AskUserQuestion" then ($c | gsub("\n"; " "))
+        elif (($tool=="Bash" or $tool=="BashOutput")
+              and ($c | test("\"event\"\\s*:\\s*\"answer\".*\"answers\"")))
+          then ($c | split("\n")[] | select(test("^\\s*\\{\"event\"\\s*:\\s*\"answer\".*\"answers\"")))
+        else empty end
+    ]
   | if length==0 then "(none)" else (map("  " + .) | join("\n")) end
 ' "$target")
 printf '%s\n\n' "$qa"

@@ -52,6 +52,7 @@ session-feedback-extract
 - session span (ユーザー turn 数 / assistant turn 数 / 期間)
 - 発動した Skill 一覧 (`Skill` ツール経由のみ。SessionStart で auto-load される `using-superpowers` 等は含まれない)
 - ユーザーが拒否した tool_use 一覧 ("doesn't want to proceed" シグナルで検出。ask→allow の記録は jsonl に残らないので拾えない)
+- 構造化質問の応答一覧 (AskUserQuestion / auq-web の回答を verbatim で surface)
 
 このあとの主観抽出 (1.2) は、この出力を必ず参照しながら進める。
 
@@ -74,6 +75,7 @@ session-feedback-extract
 - 各項目について「**これを保存しなければ、次回以降 Claude は再び同じミスをするか？**」を問う。No なら記録候補から外す
 - 失敗の**症状だけでなく根本原因**も一緒に書く
 - 各項目は**既存の永続化先と照合**する: `~/.claude/CLAUDE.md` / `<project>/CLAUDE.md` / `<project>/CLAUDE.local.md` / `.claude/rules/*.md` / auto memory。同趣旨ルールがあれば「既存ルールあり」とタグ付け
+- 1.1 の**構造化質問の応答**を読む: 回答中の自由記述・その他記述の修正・注文は「その他の改善点」、手元情報で解けた質問は「不要な確認」へ回す。素の選択（推奨どおり等）だけはシグナルにしない
 
 ## 2. 一覧提示 (表形式)
 

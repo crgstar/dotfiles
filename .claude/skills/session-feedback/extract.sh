@@ -145,3 +145,25 @@ else
   jq -c '.[]' <<< "$denied"
 fi
 printf '\n'
+
+# --- structured question answers -------------------------------------------
+# Why: AskUserQuestion / auq-web の回答はツールブロック内にありモデルが読み飛ばし
+# やすいので verbatim で surface する (どう分類するかは §1.2 の仕事)。
+# AskUserQuestion は preview 付きだと回答文字列に改行が混じり、行分割すると 2 問目
+# 以降が脱落するので改行を潰して 1 行化する。auq-web は行位置でなく JSON 内容
+# (event + answers) で拾う: 回答 JSON は初回 bash 結果か後続 BashOutput poll かで
+# "listening on" 行を伴ったり伴わなかったりするため。
+printf '## structured question answers\n'
+qa=$(jq -rs '
+  def tr_text: if type=="array" then (map(.text? // "") | join("\n")) else tostring end;
+  [ .[] | select(.type=="user") | .message.content[]?
+    | select(.type=="tool_result")
+    | (.content | tr_text) as $c
+    | if ($c | test("User has answered your questions"))
+      then ($c | gsub("\n"; " "))
+      else ($c | split("\n")[] | select(test("\"event\"\\s*:\\s*\"answer\".*\"answers\"")))
+      end
+  ]
+  | if length==0 then "(none)" else (map("  " + .) | join("\n")) end
+' "$target")
+printf '%s\n\n' "$qa"

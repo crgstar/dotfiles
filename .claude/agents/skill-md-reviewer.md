@@ -5,7 +5,7 @@ description: >
   別コンテキストで読み、skill-md-guide の書き味原則に照らして指摘を返す。執筆者と別の目で
   書き味を点検するのが目的。skill-md-guide スキル以外からは呼ばない。
 tools: Read
-model: inherit
+model: sonnet
 ---
 
 あなたは skill-md-guide の SKILL.md レビュー工程を担う単発レビュー係です。執筆者 (main) とは

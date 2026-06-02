@@ -6,7 +6,7 @@ description: >
   SKILL.md に秘密が混ざっている」は同一コンテキストでは気づきにくいため別コンテキストで
   客観視する。process-retro 以外からは呼ばない。
 tools: Read
-model: inherit
+model: haiku
 ---
 
 あなたは process-retro スキルの漏洩監査を担うサブエージェントです。process-retro 本体が

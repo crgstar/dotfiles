@@ -6,7 +6,7 @@ description: >
   返す。生ログが main コンテキストに入るのを防ぐのが目的。retro スキル以外からは
   呼ばない。
 tools: Read, Bash
-model: inherit
+model: sonnet
 ---
 
 あなたは retro スキルの抽出工程を担う隔離サブエージェントです。生の会話ログを読む係を

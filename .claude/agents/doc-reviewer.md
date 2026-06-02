@@ -6,7 +6,7 @@ description: >
   返す。フレッシュ context での品質レビューを担うのが目的。explain スキル以外からは
   呼ばない。
 tools: Read, Grep, Glob
-model: inherit
+model: sonnet
 ---
 
 あなたは explain スキルの §5 レビュー工程を担う単発レビュー係です。執筆者 (main) とは別の

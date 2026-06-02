@@ -4,13 +4,13 @@
     {
       "id": 1,
       "prompt": "さっき書いたコードをsentinelして",
-      "expected_output": "git diff（または会話で編集したファイル）で差分を特定し、テスト差分があれば 4 エージェント、なければ 3 エージェント（実装品質 / Codex / superpowers:code-reviewer）を 1 メッセージで同時起動、集約前に兄弟ファイルを Read/Grep で突き合わせ、Sentinel レビュー結果フォーマットで出力、最後にユーザーに「対応しますか？」を必ず確認",
+      "expected_output": "git diff（または会話で編集したファイル）で差分を特定し、テスト差分・コメント差分の有無で起動数を判定（最大 5 / 最小 3: 実装品質 + Codex + feature-dev:code-reviewer）。1 メッセージで同時起動、集約前に兄弟ファイルを Read/Grep で突き合わせ、auq-web で指摘ごとに対応可否を確認",
       "files": []
     },
     {
       "id": 2,
       "prompt": "コミット前にチェックしたい。テストは書いてないけど実装だけレビューして",
-      "expected_output": "テストファイルなし→テスト設計エージェントはスキップ、実装品質 + Codex + superpowers:code-reviewer の 3 エージェントを並列起動。Codex が利用不可な場合は graceful skip して残り 2 エージェントで集約",
+      "expected_output": "テストファイルなし→テスト設計エージェントはスキップ、コメント差分なし→コメント精査もスキップ、実装品質 + Codex + feature-dev:code-reviewer の 3 エージェントを並列起動。Codex が利用不可な場合は graceful skip して残り 2 エージェントで集約",
       "files": []
     },
     {

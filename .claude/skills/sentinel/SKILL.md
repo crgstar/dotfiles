@@ -1,7 +1,7 @@
 ---
 name: sentinel
 description: >
-  未コミット差分を 5 並列エージェント（実装品質 / テスト設計 / コメント精査 / Codex 外部 / superpowers:code-reviewer）で多角評価し、
+  未コミット差分を 5 並列エージェント（実装品質 / テスト設計 / コメント精査 / Codex 外部 / feature-dev:code-reviewer）で多角評価し、
   兄弟ファイルとの突き合わせを経て auq-web で「説明 + 対応可否」を 1 画面提示するスキル。
   `/code-review max` より重い多角レビューを明示的に求められたときに使う。
   「sentinelして」「品質チェック」「全方位レビュー」「多角的にレビュー」「実装もテストも見て」「5 観点でレビュー」等のリクエストで発動。
@@ -27,9 +27,9 @@ description: >
 | 2 | テスト設計 | テスト差分あり | general-purpose | `/test-design-guide` |
 | 3 | コメント精査 | コメント差分あり | general-purpose | `/comment-scrutiny` |
 | 4 | Codex 外部 | 常時 | general-purpose | `/codex-review` |
-| 5 | superpowers:code-reviewer | 常時 | `superpowers:code-reviewer` | （直接プロンプト） |
+| 5 | バグ・規約レビュー | 常時 | `feature-dev:code-reviewer` | （agent 自身の system prompt） |
 
-**type 使い分けの why**: 1〜4 は Skill を呼ぶため Skill ツールが使える general-purpose が必須。5 は専用システムプロンプトを持ち Skill 呼び出し不要。
+**type 使い分けの why**: 1〜4 は Skill を呼ぶため Skill ツールが使える general-purpose が必須。5 は named agent（tools 制限・model 固定済み）で Skill 呼び出し不要。
 
 各エージェントへの追加指示:
 
@@ -40,7 +40,7 @@ description: >
 - **2. テスト設計**: `/test-design-guide` に従う（観点はそちらに集約）
 - **3. コメント精査**: `/comment-scrutiny` に従う。差分内のコメントを「消すと壊れる」かで分類
 - **4. Codex 外部**: `copilot -p "..." --allow-all-tools --model gpt-5.3-codex 2>&1` を timeout 600000ms で実行。利用不可なら手動コマンドを提示して **graceful skip**（Codex 失敗で Sentinel 全体を止めない）
-- **5. superpowers:code-reviewer**: 入力は What was implemented（差分要約） / Plan or「ユーザー指定の改修」 / Git Range（**未コミット差分は `HEAD` と `working tree` の旨を明記**） / 完全な差分。出力は Strengths / Critical / Important / Minor / Assessment の順で日本語
+- **5. バグ・規約レビュー**: `feature-dev:code-reviewer`（named agent・tools 制限済み・Bash なし）に差分全文をプロンプトで渡す。agent は CLAUDE.md 準拠・バグ・セキュリティを confidence≥80 で絞って報告する。出力は Critical / Important の 2 段で日本語
 
 ## フェーズ 3: 一次情報との突き合わせ（必須）
 

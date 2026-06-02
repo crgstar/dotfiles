@@ -1,0 +1,29 @@
+{
+  "skill_name": "sentinel",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "さっき書いたコードをsentinelして",
+      "expected_output": "git diff（または会話で編集したファイル）で差分を特定し、テスト差分があれば 4 エージェント、なければ 3 エージェント（実装品質 / Codex / superpowers:code-reviewer）を 1 メッセージで同時起動、集約前に兄弟ファイルを Read/Grep で突き合わせ、Sentinel レビュー結果フォーマットで出力、最後にユーザーに「対応しますか？」を必ず確認",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "コミット前にチェックしたい。テストは書いてないけど実装だけレビューして",
+      "expected_output": "テストファイルなし→テスト設計エージェントはスキップ、実装品質 + Codex + superpowers:code-reviewer の 3 エージェントを並列起動。Codex が利用不可な場合は graceful skip して残り 2 エージェントで集約",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "品質チェックお願い。特にパフォーマンスが気になる",
+      "expected_output": "$ARGUMENTS の「パフォーマンスが気になる」が追加の注目点として各エージェントのプロンプトに伝わる。実装品質エージェントは「不足」だけでなく「過剰」も検出する観点を保持",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "このバグ直して",
+      "expected_output": "sentinel は発動しない（バグ修正の作業依頼でレビュー依頼ではないため description の除外条件に該当）",
+      "files": []
+    }
+  ]
+}

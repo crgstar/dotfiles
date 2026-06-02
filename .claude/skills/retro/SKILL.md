@@ -29,9 +29,8 @@ disable-model-invocation: true
 3. **セッション jsonl の特定**:
    - `pwd` で現在の作業ディレクトリを取得（会話が行われたリポ。dotfiles とは限らない）。
    - パスの `/` と `.` を両方 `-` に置換してエンコードする。例: `/Users/alice/work/project-a` → `-Users-alice-work-project-a`。
-   - `~/.claude/projects/<encoded>/*.jsonl` を新しい順に取り、先頭（最新）を選ぶ。
-   - 複数インスタンス並走時に誤選択しうるので、**選んだ jsonl パスをユーザに伝えてから**進む（§4 プレビューで `skip` できる）。
-   - マッチが無ければ `このリポのセッション jsonl が見つかりません` と伝えて中断。
+   - 環境変数 `$CLAUDE_CODE_SESSION_ID` で自分のセッション ID を取得し、`~/.claude/projects/<encoded>/<session-id>.jsonl` を直接指定する。
+   - `$CLAUDE_CODE_SESSION_ID` が空、またはファイルが存在しない場合は `セッション jsonl が見つかりません（CLAUDE_CODE_SESSION_ID=<値>）` と伝えて中断。
 
 ## §2. 抽出（サブエージェント経由）
 

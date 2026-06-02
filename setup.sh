@@ -342,7 +342,7 @@ link_file "$DOTFILES_DIR/.claude/skills/write-shared-docs/SKILL.md" \
 
 # ----- auq-web skill -----
 # why: auq-web は SKILL.md/references (Claude が読むテキスト) を他スキルと同じく
-#   dotfiles で管理し、server 実体は別リポ crgstar/auq-web に置く分割構成。
+#   dotfiles で管理し、server 実体は別リポ (auq-web) に置く分割構成。
 #   run.sh は server に sibling 依存するので、リポを単一の正として PATH に通す。
 # 旧構成 (~/.claude/skills/auq-web が repo/skill へのディレクトリ symlink) からの移行:
 #   ファイル単位 link に切り替えるため、残っていれば dir-symlink を除去する。
@@ -358,7 +358,7 @@ if [ -f "$HOME/projects/auq-web/skill/run.sh" ]; then
   link_file "$HOME/projects/auq-web/skill/run.sh" "$HOME/.local/bin/auq-web"
 else
   echo "警告: ~/projects/auq-web が無いため auq-web コマンドは未配線"
-  echo "      git clone git@github.com:crgstar/auq-web.git ~/projects/auq-web"
+  echo "      git clone \"\$AUQ_WEB_REPO\" ~/projects/auq-web  # set AUQ_WEB_REPO to your fork"
 fi
 
 # why: mattpocock/skills は第三者リポなので dotfiles に取り込まず、

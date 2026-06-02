@@ -163,6 +163,15 @@
       "Bash(sh */.claude/skills/*)"
     ],
     "deny": [
+      "Read(*.env)",
+      "Read(*.env.*)",
+      "Edit(*.env)",
+      "Edit(*.env.*)",
+      "Write(*.env)",
+      "Write(*.env.*)",
+      "Bash(*.env)",
+      "Bash(*.env *)",
+      "Bash(*.env.*)",
       "Bash(rm -rf / *)",
       "Bash(rm -rf ~ *)",
       "Bash(git push --force *)",

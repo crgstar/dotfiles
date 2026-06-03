@@ -341,7 +341,7 @@ link_file "$DOTFILES_DIR/.claude/skills/write-shared-docs/SKILL.md" \
           "$HOME/.claude/skills/write-shared-docs/SKILL.md"
 
 # why: sentinel (多角レビュー) は入口スキル comment-scrutiny / implementation-review /
-#      codex-review / test-design-guide に fan-out し、それらと sentinel 自身が
+#      test-design-guide に fan-out し、それらと sentinel 自身が
 #      shared/review-severity.md を共通参照する。スキル単体では完結しないので
 #      依存スキルと共有定義をまとめて配線する。evals は skill-creator 用の dev 資産。
 link_file "$DOTFILES_DIR/.claude/skills/sentinel/SKILL.md" \
@@ -352,8 +352,6 @@ link_file "$DOTFILES_DIR/.claude/skills/comment-scrutiny/SKILL.md" \
           "$HOME/.claude/skills/comment-scrutiny/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/implementation-review/SKILL.md" \
           "$HOME/.claude/skills/implementation-review/SKILL.md"
-link_file "$DOTFILES_DIR/.claude/skills/codex-review/SKILL.md" \
-          "$HOME/.claude/skills/codex-review/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/test-design-guide/SKILL.md" \
           "$HOME/.claude/skills/test-design-guide/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/shared/review-severity.md" \

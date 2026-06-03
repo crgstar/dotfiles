@@ -1,11 +1,11 @@
 ---
 name: sentinel
 description: >
-  未コミット差分を 5 並列エージェント（実装品質 / テスト設計 / コメント精査 / Codex 外部 / feature-dev:code-reviewer）で多角評価し、
+  未コミット差分を 4 並列エージェント（実装品質 / テスト設計 / コメント精査 / feature-dev:code-reviewer）で多角評価し、
   兄弟ファイルとの突き合わせを経て auq-web で「説明 + 対応可否」を 1 画面提示するスキル。
   `/code-review max` より重い多角レビューを明示的に求められたときに使う。
-  「sentinelして」「品質チェック」「全方位レビュー」「多角的にレビュー」「実装もテストも見て」「5 観点でレビュー」等のリクエストで発動。
-  対象外: /simplify 指定、GitHub PR レビュー、単一観点のみの依頼（Codex だけ / テストだけ等）、
+  「sentinelして」「品質チェック」「全方位レビュー」「多角的にレビュー」「実装もテストも見て」「4 観点でレビュー」等のリクエストで発動。
+  対象外: /simplify 指定、GitHub PR レビュー、単一観点のみの依頼（テストだけ等）、
   リクエストがバグ修正やリファクタ等の作業依頼でレビュー依頼ではないとき、`/code-review max` で十分な小規模変更。
 ---
 
@@ -26,10 +26,9 @@ description: >
 | 1 | 実装品質 | 常時 | general-purpose | `/implementation-review` |
 | 2 | テスト設計 | テスト差分あり | general-purpose | `/test-design-guide` |
 | 3 | コメント精査 | コメント差分あり | general-purpose | `/comment-scrutiny` |
-| 4 | Codex 外部 | 常時 | general-purpose | `/codex-review` |
-| 5 | バグ・規約レビュー | 常時 | `feature-dev:code-reviewer` | （agent 自身の system prompt） |
+| 4 | バグ・規約レビュー | 常時 | `feature-dev:code-reviewer` | （agent 自身の system prompt） |
 
-**type 使い分けの why**: 1〜4 は Skill を呼ぶため Skill ツールが使える general-purpose が必須。5 は named agent（tools 制限・model 固定済み）で Skill 呼び出し不要。
+**type 使い分けの why**: 1〜3 は Skill を呼ぶため Skill ツールが使える general-purpose が必須。4 は named agent（tools 制限・model 固定済み）で Skill 呼び出し不要。
 
 各エージェントへの追加指示:
 
@@ -39,8 +38,7 @@ description: >
   - 重要度は `.claude/skills/shared/review-severity.md` の定義に従う。**本文をプロンプトに直接含める**（独立コンテキストの subagent には参照パスが届かないため）
 - **2. テスト設計**: `/test-design-guide` に従う（観点はそちらに集約）
 - **3. コメント精査**: `/comment-scrutiny` に従う。差分内のコメントを「消すと壊れる」かで分類
-- **4. Codex 外部**: `copilot -p "..." --allow-all-tools --model gpt-5.3-codex 2>&1` を timeout 600000ms で実行。利用不可なら手動コマンドを提示して **graceful skip**（Codex 失敗で Sentinel 全体を止めない）
-- **5. バグ・規約レビュー**: `feature-dev:code-reviewer`（named agent・tools 制限済み・Bash なし）に差分全文をプロンプトで渡す。agent は CLAUDE.md 準拠・バグ・セキュリティを confidence≥80 で絞って報告する。出力は Critical / Important の 2 段で日本語
+- **4. バグ・規約レビュー**: `feature-dev:code-reviewer`（named agent・tools 制限済み・Bash なし）に差分全文をプロンプトで渡す。agent は CLAUDE.md 準拠・バグ・セキュリティを confidence≥80 で絞って報告する。出力は Critical / Important の 2 段で日本語
 
 ## フェーズ 3: 一次情報との突き合わせ（必須）
 
@@ -74,7 +72,7 @@ description: >
 
 ### sentinel 固有の点（実行は `auq-web` の手順に従う）
 
-- **meta は省略**: 冒頭ヘッダー（対象差分・各エージェント一行サマリ・Codex スキップ通知）を **「最初の指摘の desc 冒頭」** にまとめる
+- **meta は省略**: 冒頭ヘッダー（対象差分・各エージェント一行サマリ）を **「最初の指摘の desc 冒頭」** にまとめる
 - **指摘 N 件 → question N 個** を 1 つの HTML に並べる
 - `event: "reject"` のときはフェーズ 5 へ進まない
 
@@ -91,7 +89,7 @@ description: >
 
 ### 各 question の desc HTML
 
-- **最初の指摘の desc 冒頭のみ**: 対象差分のファイル一覧 / 各エージェントの一行サマリ / Codex スキップ時はその旨を `<p class="warn">`
+- **最初の指摘の desc 冒頭のみ**: 対象差分のファイル一覧 / 各エージェントの一行サマリ
 - 既存との比較: 一致 / 不一致 + 具体ファイル:行
 - 「既存 vs 今回」コード並列: 兄弟ファイル該当箇所と今回の差分該当箇所を `<pre><code>` 2 つで並べ、判断を「記述より現物」に寄せる
 - 推奨 + why（既存追認 / 改善推奨 / 高重要度のため対応推奨 など）

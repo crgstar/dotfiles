@@ -34,6 +34,8 @@ description: >
 gh pr list --state merged --limit 5 --json title,body
 ```
 
+`body` は全文を読む。慣習（セクション構成・語調）が後半にしか現れないリポがある。
+
 PR が無いリポジトリでは `.github/pull_request_template.md` と CLAUDE.md を参照する。両方無ければ Phase 3 のデフォルトカタログで進める。
 
 ## Phase 3: 本文を section catalog から組み立てる

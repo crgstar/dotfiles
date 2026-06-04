@@ -352,6 +352,8 @@ link_file "$DOTFILES_DIR/.claude/skills/comment-scrutiny/SKILL.md" \
           "$HOME/.claude/skills/comment-scrutiny/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/implementation-review/SKILL.md" \
           "$HOME/.claude/skills/implementation-review/SKILL.md"
+link_file "$DOTFILES_DIR/.claude/skills/implement-from-wireframe/SKILL.md" \
+          "$HOME/.claude/skills/implement-from-wireframe/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/test-design-guide/SKILL.md" \
           "$HOME/.claude/skills/test-design-guide/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/shared/review-severity.md" \

@@ -113,6 +113,9 @@ printf '%s\n\n' "$skills"
 # Why drop old_string/new_string: a single denied Edit can carry kilobytes
 # of diff text that is irrelevant to triage and just burns context. Keep
 # only file_path for Edit/Write; pass other tool inputs through as-is.
+# Why exclude AskUserQuestion: AUQ rejection is not a permission signal --
+# it almost always means Claude asked before gathering the prerequisites.
+# Surfaced separately in `## askuserquestion rejections` below.
 printf '## permission denied tool uses\n'
 denied=$(jq -cs '
   [.[] | select(.type=="user")
@@ -123,7 +126,9 @@ denied=$(jq -cs '
   ] as $ids
   | [.[] | select(.type=="assistant")
          | .message.content[]?
-         | select(.type=="tool_use" and (.id as $id | $ids | index($id) != null))
+         | select(.type=="tool_use"
+                  and .name != "AskUserQuestion"
+                  and (.id as $id | $ids | index($id) != null))
          | {
              name,
              input: (
@@ -146,6 +151,43 @@ else
 fi
 printf '\n'
 
+# --- askuserquestion rejections --------------------------------------------
+# Why separate section: AskUserQuestion rejection != denial. Most often it
+# signals that Claude asked before establishing the premise from primary
+# sources (files, git, memory). Surface the original question text /
+# options so the skill can diagnose which premise was missing.
+printf '## askuserquestion rejections\n'
+auq_rej=$(jq -cs '
+  [.[] | select(.type=="user")
+        | .message.content[]?
+        | select(.type=="tool_result" and .is_error==true)
+        | select((.content | tostring) | test("doesn.t want to proceed|tool use was rejected"; "i"))
+        | .tool_use_id
+  ] as $ids
+  | [.[] | select(.type=="assistant")
+         | .message.content[]?
+         | select(.type=="tool_use"
+                  and .name == "AskUserQuestion"
+                  and (.id as $id | $ids | index($id) != null))
+         | {
+             questions: [
+               .input.questions[]? | {
+                 question,
+                 header,
+                 options: [.options[]? | .label]
+               }
+             ]
+           }
+  ]
+' "$target")
+
+if [[ "$auq_rej" == "[]" ]]; then
+  printf '(none)\n'
+else
+  jq -c '.[]' <<< "$auq_rej"
+fi
+printf '\n'
+
 # --- structured question answers -------------------------------------------
 # Why: AskUserQuestion / auq-web の回答はツールブロック内にありモデルが読み飛ばし
 # やすいので verbatim で surface する (どう分類するかは §1.2 の仕事)。
@@ -156,6 +198,9 @@ printf '\n'
 # AskUserQuestion は preview 付きだと回答文字列に改行が混じり、行分割すると 2 問目
 # 以降が脱落するので改行を潰して 1 行化する。auq-web の回答は Bash 出力なので、その
 # 中から event+answers の JSON 行だけを拾う。
+# Why skip is_error=true: rejected AUQ の tool_result は "The user doesn't want
+# to proceed..." メタテキストが入り、回答として読むと偽の "answer" になる。拒否は
+# `## askuserquestion rejections` で別建てしているので、ここでは除外する。
 printf '## structured question answers\n'
 qa=$(jq -rs '
   def tr_text: if type=="array" then (map(.text? // "") | join("\n")) else tostring end;
@@ -163,6 +208,7 @@ qa=$(jq -rs '
       | select(.type=="tool_use") | {(.id): .name} ] | add // {} ) as $names
   | [ .[] | select(.type=="user") | .message.content[]?
       | select(.type=="tool_result")
+      | select(.is_error != true)
       | $names[.tool_use_id] as $tool
       | (.content | tr_text) as $c
       | if $tool == "AskUserQuestion" then ($c | gsub("\n"; " "))

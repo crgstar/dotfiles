@@ -31,6 +31,10 @@ disable-model-invocation: true
    - パスの `/` と `.` を両方 `-` に置換してエンコードする。例: `/Users/alice/work/project-a` → `-Users-alice-work-project-a`。
    - 環境変数 `$CLAUDE_CODE_SESSION_ID` で自分のセッション ID を取得し、`~/.claude/projects/<encoded>/<session-id>.jsonl` を直接指定する。
    - `$CLAUDE_CODE_SESSION_ID` が空、またはファイルが存在しない場合は `セッション jsonl が見つかりません（CLAUDE_CODE_SESSION_ID=<値>）` と伝えて中断。
+4. **mirugit annotation file の特定**（任意）:
+   - `~/.mirugit/review-session.json` を読み、`.token` を取得。ファイルが無い・token が無い場合はスキップ（このまま §2 へ）。
+   - `~/.mirugit/annotations/*/sessions/<token>.json` を glob で検索。1 件ヒットしたらそのパスを記憶。0 件 or 複数なら**スキップ**（複数ヒットは想定外なので、混乱を避けるため main では選ばない。`~/.mirugit/annotations/` 配下は作業リポと無関係な dotfiles でしか開けないので、main が中身を読んでサニタイズ判断するのは規律違反）。
+   - 見つかった場合のみ §2 で `retro-extractor` に追加で渡す。main では中身を読まない（生コメントが作業リポ固有情報を含み得るため）。
 
 ## §2. 抽出（サブエージェント経由）
 
@@ -48,6 +52,7 @@ jsonl の解析・シグナル抽出・§3 サニタイズを `retro-extractor` 
 - **このファイル**: `~/dotfiles/.claude/skills/retro/SKILL.md` の絶対パス（§2 と §3 を作業仕様として読ませる）
 - **対象スキル一覧**: §1.2 の結果
 - **作業リポのルート**: 絶対 `pwd`（サニタイズ時に「これはこのリポ固有の名前だ」と気づく手がかり）
+- **mirugit annotation file**（任意）: §1.4 で見つかった場合のみ絶対パスを渡す。見つからなければこの項目自体を渡さない
 
 `retro-extractor` は §2.2 の固定フォーマット（または下記エラー形）だけを返す。何か失敗したら部分結果と混ぜず次の形を返す:
 
@@ -66,6 +71,7 @@ jsonl の解析・シグナル抽出・§3 サニタイズを `retro-extractor` 
 - **出力の明示的拒否** — スキルの生成物をユーザが明確に拒否した
 - **レビューでの根本原因指摘** — レビュー時に SKILL.md の文言がミスの根本原因として名指しされた
 - **構造化質問への注文** — AskUserQuestion / auq-web の自由コメント・「その他」記述で、提示した選択肢や方針に注文・修正・ためらいを書いた（選択肢を素で選んだだけは対象外）
+- **mirugit annotation 上のユーザコメント** — 渡された場合のみ。`author: "user"` のコメントは file:line に紐づく直接的なフィードバック。特に Claude のレビューアノテーション (`replyTo` の親) への返信で「違う」「直して」「要らない」系の訂正、用語・挙動への質問は強いシグナル。素の承認 (`LGTM` / `実行して` 等) は対象外
 
 ### §2.2 候補スキーマ（シグナルごとに 1 つ）と返却フォーマット
 

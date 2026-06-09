@@ -127,7 +127,7 @@
       "Bash(sysctl *)",
       "Bash(nproc *)",
       "Bash(uuidgen *)",
-      "Bash(bun */mirugit/scripts/*)",
+      "Bash(bun */mirugit/scripts/*:*)",
       "Bash(pkill -f mirugit*)",
       "Bash(curl * http://127.0.0.1:19556/*)",
       "Read(*/.mirugit/*)",

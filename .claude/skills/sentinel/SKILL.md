@@ -81,7 +81,8 @@ description: >
 ### 各 question の構成
 
 - `id: "issue_<n>"` / `kind: "single"`（multi にすると「対応 / スキップ」が排他で取れないため single 固定）
-- `title`: `#<n> [重要度] 一行サマリ（出典）`
+- `title`: `#<n> [<agent略称>/重要度] 一行サマリ（出典）`
+  - agent 略称はフェーズ 2 の番号順に `実装` / `テスト` / `コメント` / `バグ規約`
 - `options[]`:
   - `{ value: "fix",     label: "対応する" }`
   - `{ value: "skip",    label: "スキップする" }`

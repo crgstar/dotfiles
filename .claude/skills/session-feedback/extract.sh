@@ -220,3 +220,62 @@ qa=$(jq -rs '
   | if length==0 then "(none)" else (map("  " + .) | join("\n")) end
 ' "$target")
 printf '%s\n\n' "$qa"
+
+# --- mirugit annotations ---------------------------------------------------
+# Why surface user-authored mirugit annotations: review-session.json holds the
+# current mirugit review token. The matching sessions/<token>.json contains
+# both Claude reviews and user replies/comments. Entries with author=="user"
+# are explicit feedback signals pinned to a specific file:line — a stronger
+# signal than fishing the same thing out of free-form conversation text.
+# Why glob by token (not repo-id): annotation files live under
+# ~/.mirugit/annotations/<repo-id>/sessions/<token>.json, and computing
+# repo-id from $PWD here would require the mirugit script. The token is a
+# UUID so globbing by it is unambiguous and works without the script.
+printf '## mirugit annotations\n'
+
+review_session="$HOME/.mirugit/review-session.json"
+mirugit_token=""
+if [[ -f "$review_session" ]]; then
+  mirugit_token=$(jq -r '.token // empty' "$review_session" 2>/dev/null || true)
+fi
+
+if [[ -z "$mirugit_token" ]]; then
+  printf '(no active mirugit review session)\n\n'
+else
+  shopt -s nullglob
+  ann_files=( "$HOME"/.mirugit/annotations/*/sessions/"$mirugit_token".json )
+  shopt -u nullglob
+  if (( ${#ann_files[@]} == 0 )); then
+    printf 'token: %s (no annotation file)\n\n' "$mirugit_token"
+  else
+    ann_file="${ann_files[0]}"
+    printf 'file: %s\n' "$ann_file"
+    user_anns=$(jq -r '
+      def target_str:
+        if .type == "line" then ":" + (.line | tostring)
+        elif .type == "range" then ":" + (.startLine | tostring) + "-" + (.endLine | tostring)
+        elif .type == "file" then ""
+        elif .type == "reply" then " (reply)"
+        else "" end;
+      def parent_body($anns; $id):
+        ($anns | map(select(.id == $id)) | .[0].body // "")
+        | gsub("\n"; " ") | .[0:120];
+      . as $root
+      | [.annotations[] | select(.author=="user")] as $users
+      | if ($users | length) == 0 then "(no user annotations)"
+        else
+          $users
+          | map(
+              "- " + .file + (.target | target_str)
+              + " — " + (.body | gsub("\n"; " ") | .[0:200])
+              + (if .replyTo != null
+                  then "\n    (reply to claude: "
+                       + parent_body($root.annotations; .replyTo) + ")"
+                  else "" end)
+            )
+          | join("\n")
+        end
+    ' "$ann_file")
+    printf '%s\n\n' "$user_anns"
+  fi
+fi

@@ -45,6 +45,7 @@ session-feedback-extract
 - ユーザーが拒否した tool_use 一覧 ("doesn't want to proceed" シグナルで検出。ask→allow の記録は jsonl に残らないので拾えない。**AskUserQuestion 拒否は除外し下記の別セクションで surface**)
 - AskUserQuestion 拒否一覧 (拒否時の元質問文 / header / 選択肢を verbatim で surface。拒否 ≠ 否定で、前提条件不足のシグナルとして扱うため別建てにしている)
 - 構造化質問の応答一覧 (AskUserQuestion / auq-web の回答を verbatim で surface)
+- mirugit annotations (`~/.mirugit/review-session.json` の token に対応する `sessions/<token>.json` から `author: "user"` のコメントを surface。reply の場合は親 Claude コメントの先頭 120 字も併記)
 
 このあとの主観抽出 (1.2) は、この出力を必ず参照しながら進める。
 
@@ -70,6 +71,7 @@ session-feedback-extract
 - 各項目は**既存の永続化先と照合**する: `~/.claude/CLAUDE.md` / `<project>/CLAUDE.md` / `<project>/CLAUDE.local.md` / `.claude/rules/*.md` / auto memory。同趣旨ルールがあれば「既存ルールあり」とタグ付け
 - 1.1 の**構造化質問の応答**を読む: 回答中の自由記述・その他記述の修正・注文は「その他の改善点」、手元情報で解けた質問は「不要な確認」へ回す。素の選択（推奨どおり等）だけはシグナルにしない
 - 1.1 の **AskUserQuestion 拒否一覧**を読む: 拒否は否定ではなく、**前提情報が不足したまま質問してしまったシグナル**であることが多い。元質問の question / options を見て (a) 手元 (一次情報・git・既存実装・memory) で確定できたなら質問自体が不要だった / (b) ユーザ判断は妥当だが選択肢の判断材料 (現状・トレードオフ・関連パス) が質問文に含まれず答えられなかった、のどちらかなら「早すぎる質問」へ。それ以外 (好み・方針の純粋な選択を保留した) はノイズとしてスキップ
+- 1.1 の **mirugit annotations** を読む: file:line に紐づく直接的な訂正シグナル。Claude のレビューアノテーション (`author: "claude"`) への返信 (reply) は内容で振り分ける — 「違う」「直して」「要らない」系の訂正は `その他の改善点` か `繰り返した失敗`、 用語/挙動の質問は `ドキュメント更新候補` 候補。`実行して` `LGTM` 等の素の承認はシグナルにしない
 
 ## 2. 一覧提示 (1 表に統合)
 

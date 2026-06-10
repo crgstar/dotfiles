@@ -17,9 +17,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>__タイトル__</title>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script>
-    mermaid.initialize({ startOnLoad: true, securityLevel: 'loose', theme: 'default', themeVariables: { fontFamily: 'inherit' } });
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    // Mermaid は fontFamily のメトリクスでノード幅を計測する。欧文フォントのまま
+    // 日本語を描画すると計測と描画がズレてラベルが見切れるため、フォント読込完了を
+    // 待ってから日本語フォントを明示して初期化する ('inherit' は foreignObject 内で
+    // 継承が途切れることがある)
+    await document.fonts.ready;
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: 'loose',
+      theme: 'default',
+      fontFamily: '"Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif',
+      flowchart: { useMaxWidth: false, htmlLabels: true, padding: 20 },
+      sequence: { useMaxWidth: false },
+    });
   </script>
   <style>
     :root {
@@ -181,6 +193,25 @@
       padding: 18px;
       margin: 16px 0;
       overflow: auto;
+    }
+    pre.mermaid {
+      white-space: normal;
+      background: transparent;
+      border: none;
+      padding: 0;
+      overflow: hidden;
+      max-width: 100%;
+      font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    }
+    pre.mermaid svg {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+    /* initialize の fontFamily と描画フォントを一致させる (計測ズレによる
+       日本語ラベル見切れ防止の描画側) */
+    .mermaid foreignObject div {
+      font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif !important;
     }
     .diagram .caption {
       color: var(--fg-mute);

@@ -64,6 +64,14 @@
       "Bash(git -C * blame *)",
       "Bash(git -C * rev-parse *)",
       "Bash(git -C * stash list *)",
+      "Bash(git -C * status)",
+      "Bash(git -C * log)",
+      "Bash(git -C * diff)",
+      "Bash(git -C * fetch)",
+      "Bash(git -C * branch)",
+      "Bash(git -C * show)",
+      "Bash(git -C * remote)",
+      "Bash(git -C * stash list)",
       "Bash(gh pr view *)",
       "Bash(gh pr list *)",
       "Bash(gh pr status *)",
@@ -262,5 +270,6 @@
   "skipAutoPermissionPrompt": true,
   "voiceEnabled": true,
   "autoMemoryEnabled": true,
+  "skipWorkflowUsageWarning": true,
   "verbose": false
 }

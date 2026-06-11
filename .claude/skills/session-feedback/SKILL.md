@@ -41,7 +41,7 @@ session-feedback-extract
 
 得られるもの:
 - session span (ユーザー turn 数 / assistant turn 数 / 期間)
-- 発動した Skill 一覧 (`Skill` ツール経由のみ。SessionStart で auto-load される `using-superpowers` 等は含まれない)
+- 発動した Skill 一覧 (`Skill` ツール経由のみ。SessionStart で auto-load される `using-superpowers` 等は含まれない。session-feedback 自身はスクリプト実行タイミングのずれで含まれないことがある — Skill 一覧の集計に手動で加える)
 - ユーザーが拒否した tool_use 一覧 ("doesn't want to proceed" シグナルで検出。ask→allow の記録は jsonl に残らないので拾えない。**AskUserQuestion 拒否は除外し下記の別セクションで surface**)
 - AskUserQuestion 拒否一覧 (拒否時の元質問文 / header / 選択肢を verbatim で surface。拒否 ≠ 否定で、前提条件不足のシグナルとして扱うため別建てにしている)
 - 構造化質問の応答一覧 (AskUserQuestion / auq-web の回答を verbatim で surface)

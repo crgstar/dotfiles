@@ -36,6 +36,7 @@ description: >
   - 既存コードとの一貫性を最優先（指摘には根拠ファイル:行を併記）
   - 非機能要件は「不足」だけでなく「過剰」（不要なメモ化・過度な抽象化）も検出
   - 重要度は `.claude/skills/shared/review-severity.md` の定義に従う。**本文をプロンプトに直接含める**（独立コンテキストの subagent には参照パスが届かないため）
+  - コメント追加の提案は `/comment-scrutiny` 通過後に絞る（提案→全削除の二重審査を防ぐ）
 - **2. テスト設計**: `/test-design-guide` に従う（観点はそちらに集約）
 - **3. コメント精査**: `/comment-scrutiny` に従う。差分内のコメントを「消すと壊れる」かで分類
 - **4. バグ・規約レビュー**: `feature-dev:code-reviewer`（named agent・tools 制限済み・Bash なし）に差分全文をプロンプトで渡す。agent は CLAUDE.md 準拠・バグ・セキュリティを confidence≥80 で絞って報告する。出力は Critical / Important の 2 段で日本語

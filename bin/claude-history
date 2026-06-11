@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Claude Code の会話履歴（.jsonl）を人間が読める形式で出力する。"""
+
+import json
+import re
+import sys
+
+
+def match(text: str, pattern: str) -> bool:
+    return bool(re.search(pattern, text, re.IGNORECASE))
+
+
+def extract_blocks(path: str, show_thinking: bool) -> list[dict]:
+    """jsonlから表示用ブロックのリストを生成する。"""
+    blocks = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            obj = json.loads(line)
+            t = obj.get("type")
+            content = obj.get("message", {}).get("content", [])
+
+            if t == "user":
+                if isinstance(content, str):
+                    text = content
+                elif isinstance(content, list):
+                    text = "".join(
+                        c["text"] for c in content
+                        if c.get("type") == "text"
+                    )
+                else:
+                    text = ""
+                # `<` で始まるのは system-reminder などの XML 形式のメタ情報なので除外
+                if text and not text.startswith("<"):
+                    blocks.append({"role": "user", "text": text})
+
+            elif t == "assistant":
+                if isinstance(content, list):
+                    for c in content:
+                        if c.get("type") == "thinking" and c.get("thinking") and show_thinking:
+                            blocks.append({"role": "thinking", "text": c["thinking"]})
+                        elif c.get("type") == "text" and c.get("text"):
+                            blocks.append({"role": "assistant", "text": c["text"]})
+
+    return blocks
+
+
+SEPARATOR = "─" * 60
+
+
+def format_block(block: dict) -> list[str]:
+    """ブロックを行のリストに変換する。"""
+    role = block["role"]
+    text = block["text"]
+    if role == "user":
+        return ["=== USER ==="] + text.splitlines()
+    if role == "assistant":
+        return ["=== ASSISTANT ==="] + text.splitlines()
+    if role == "thinking":
+        return ["--- thinking ---"] + text.splitlines() + ["--- /thinking ---"]
+    raise ValueError(f"unknown role: {role}")
+
+
+def print_block(block: dict, start_lineno: int, with_separator: bool = True, show_number: bool = False) -> None:
+    lines = format_block(block)
+    if with_separator:
+        print(SEPARATOR)
+    for i, line in enumerate(lines):
+        if show_number:
+            print(f"{start_lineno + i}\t{line}")
+        else:
+            print(line)
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    show_thinking = "--no-thinking" not in args
+    show_number = "-n" in args
+    show_separator = "--separator" in args
+    grep_user = next((a[len("--grep-user="):] for a in args if a.startswith("--grep-user=")), None)
+    grep_assistant = next((a[len("--grep-assistant="):] for a in args if a.startswith("--grep-assistant=")), None)
+    after = next((int(a[len("-A"):]) for a in args if re.fullmatch(r"-A\d+", a)), 0)
+    before = next((int(a[len("-B"):]) for a in args if re.fullmatch(r"-B\d+", a)), 0)
+    files = [a for a in args if not a.startswith("-")]
+
+    if not files:
+        print(
+            "usage: claude-history [-n] [--separator] [--no-thinking] [--grep-user=PAT] [--grep-assistant=PAT] [-AN] [-BN] <file.jsonl>",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    blocks = extract_blocks(files[0], show_thinking)
+
+    # 各ブロックの開始行番号を事前計算（grep前の全出力ベース）
+    linenos = []
+    lineno = 1
+    for b in blocks:
+        linenos.append(lineno)
+        lineno += len(format_block(b))
+
+    # grepなしはそのまま全出力
+    if grep_user is None and grep_assistant is None:
+        for i, b in enumerate(blocks):
+            print_block(b, linenos[i], with_separator=show_separator, show_number=show_number)
+        return
+
+    # マッチするブロックのインデックスを収集
+    matched = set()
+    for i, b in enumerate(blocks):
+        if grep_user and b["role"] == "user" and match(b["text"], grep_user):
+            matched.add(i)
+        if grep_assistant and b["role"] == "assistant" and match(b["text"], grep_assistant):
+            matched.add(i)
+
+    # before/after を展開し、連続したインデックスをグループ化
+    ranges = []
+    for i in sorted(matched):
+        start = max(0, i - before)
+        end = min(len(blocks), i + after + 1)
+        if ranges and start <= ranges[-1][1]:
+            # 前のグループと重なる/連続する場合は統合
+            ranges[-1] = (ranges[-1][0], max(ranges[-1][1], end))
+        else:
+            ranges.append((start, end))
+
+    # -A/-B未指定でuserのみgrepの場合はassistantを除外するフィルタ
+    only_user = grep_user and grep_assistant is None and after == 0 and before == 0
+
+    for start, end in ranges:
+        group_blocks = [
+            (i, blocks[i]) for i in range(start, end)
+            if not (only_user and blocks[i]["role"] != "user")
+        ]
+        for pos, (i, b) in enumerate(group_blocks):
+            # グループの先頭にだけ区切り線（--separator指定時）
+            print_block(b, linenos[i], with_separator=(show_separator and pos == 0), show_number=show_number)
+
+
+if __name__ == "__main__":
+    main()

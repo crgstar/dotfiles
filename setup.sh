@@ -189,10 +189,15 @@ else
 fi
 link_file "$ghostty_src" "$HOME/.config/ghostty/config"
 
-# ----- bin -----
+# ----- Bin -----
 
-link_file "$DOTFILES_DIR/bin/displaylink-restart" \
-          "$HOME/.local/bin/displaylink-restart"
+# nullglob: bin/ が空ならループ自体スキップ（リテラル `bin/*` を処理してしまうのを防ぐ）
+shopt -s nullglob
+for script in "$DOTFILES_DIR/bin/"*; do
+  [ -f "$script" ] || continue
+  link_file "$script" "$HOME/.local/bin/$(basename "$script")"
+done
+shopt -u nullglob
 
 # why: スキル本文から "session-feedback-extract" の短縮名で呼べるようにし、
 #      Bash(session-feedback-extract:*) の allow ルールだけで権限ダイアログを抑える

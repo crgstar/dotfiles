@@ -25,6 +25,7 @@ description: >
   git diff "$BASE"...HEAD
   ```
 - 未コミット変更があれば、含めて commit するか stash するかをユーザに確認する。`git add -A` は使わない。
+- コミットが必要なときは `.gitmessage` を Read してからメッセージを組み立てる。リポジトリごとに絵文字・書式規約が違うので推測で選ばない。
 
 ## Phase 2: 既存 PR から慣習を把握
 

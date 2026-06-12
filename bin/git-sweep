@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# git sweep: リモートで消えたローカルブランチを安全に掃除する
+#
+# 候補: upstream が gone、または upstream 未設定かつ同名の origin ブランチが無いもの
+# 削除判定 (上から順に試す):
+#   1. デフォルトブランチにマージ済み           → -d で削除
+#   2. merged PR があり base がデフォルトブランチ → -D で削除 (squash でも内容は取り込み済み)
+#   3. merged PR があり base から commit 到達可能 → -D で削除 (true merge で base に保全済み)
+#   4. それ以外                                  → 残して報告 (未 push 作業の保護)
+set -u
+
+def=$(git symbolic-ref -q --short refs/remotes/origin/HEAD)
+def=${def#origin/}
+[ -z "$def" ] && def=main
+cur=$(git symbolic-ref -q --short HEAD || true)
+if [ "$cur" != "$def" ]; then
+  echo "sweep: デフォルトブランチ ($def) 以外では実行しません (現在: ${cur:-detached HEAD})"
+  exit 1
+fi
+
+git fetch --prune || exit 1
+
+cands=$(git for-each-ref --format='%(HEAD)|%(refname:short)|%(upstream)|%(upstream:track)' refs/heads |
+  while IFS='|' read -r head name up track; do
+    [ "$head" = "*" ] && continue
+    if [ "$track" = "[gone]" ]; then
+      echo "$name"
+    elif [ -z "$up" ] && ! git show-ref -q --verify "refs/remotes/origin/$name"; then
+      echo "$name"
+    fi
+  done)
+
+if [ -z "$cands" ]; then
+  echo "sweep: 削除対象なし"
+  exit 0
+fi
+
+# ブランチ名に空白は使えないため、素の for で安全に回せる
+for name in $cands; do
+  if git branch -d "$name" 2>/dev/null; then
+    continue
+  fi
+
+  # ローカル未マージ: GitHub に merged PR が無いか照会 (gh 不在・GitHub 以外なら空)
+  pr=""
+  if command -v gh >/dev/null; then
+    pr=$(gh pr list --head "$name" --state merged --json number,baseRefName \
+      --jq '.[0] // empty | "\(.number)|\(.baseRefName)"' 2>/dev/null </dev/null) || pr=""
+  fi
+
+  if [ -z "$pr" ]; then
+    echo "sweep: $name は未マージのため残しました (マージ済み PR も無し。内容確認のうえ git branch -D $name)"
+    continue
+  fi
+
+  IFS='|' read -r num base <<<"$pr"
+  if [ "$base" = "$def" ]; then
+    git branch -D "$name" >/dev/null &&
+      echo "sweep: $name を削除しました (PR #$num が $base にマージ済み)"
+  elif git show-ref -q --verify "refs/remotes/origin/$base" &&
+    git merge-base --is-ancestor "$name" "origin/$base"; then
+    git branch -D "$name" >/dev/null &&
+      echo "sweep: $name を削除しました (PR #$num が $base にマージ済み、コミットも origin/$base に保全)"
+  else
+    # base が消えたか squash で base 行き: 内容が main に届く保証が無いので消さない
+    echo "sweep: $name は PR #$num が $base にマージ済みですが、origin/$base への到達を確認できず残しました (内容確認のうえ git branch -D $name)"
+  fi
+done

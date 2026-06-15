@@ -4,13 +4,13 @@
     {
       "id": 1,
       "prompt": "さっき書いたコードをsentinelして",
-      "expected_output": "git diff（または会話で編集したファイル）で差分を特定し、テスト差分・コメント差分の有無で起動数を判定（最大 5 / 最小 3: 実装品質 + Codex + feature-dev:code-reviewer）。1 メッセージで同時起動、集約前に兄弟ファイルを Read/Grep で突き合わせ、auq-web で指摘ごとに対応可否を確認",
+      "expected_output": "git diff（または会話で編集したファイル）で差分を特定し、テスト差分・コメント差分の有無で起動数を判定（最大 4 / 最小 2: 実装品質 + feature-dev:code-reviewer）。1 メッセージで同時起動し、各エージェントには差分全文と変更ファイルのフルパス一覧を渡してファイル全体を Read させる。集約前に同趣旨指摘の統合と兄弟ファイルの Read/Grep 突き合わせを行い、auq-web で指摘ごとに対応可否を確認",
       "files": []
     },
     {
       "id": 2,
       "prompt": "コミット前にチェックしたい。テストは書いてないけど実装だけレビューして",
-      "expected_output": "テストファイルなし→テスト設計エージェントはスキップ、コメント差分なし→コメント精査もスキップ、実装品質 + Codex + feature-dev:code-reviewer の 3 エージェントを並列起動。Codex が利用不可な場合は graceful skip して残り 2 エージェントで集約",
+      "expected_output": "テストファイルなし→テスト設計エージェントはスキップ、コメント差分なし→コメント精査もスキップ、実装品質 + feature-dev:code-reviewer の 2 エージェントを並列起動",
       "files": []
     },
     {
@@ -23,6 +23,12 @@
       "id": 4,
       "prompt": "このバグ直して",
       "expected_output": "sentinel は発動しない（バグ修正の作業依頼でレビュー依頼ではないため description の除外条件に該当）",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "全方位レビューして（差分に feature-dev:code-reviewer が Critical 1 件を報告した想定）",
+      "expected_output": "集約時に Critical を重要度「高」に読み替え、フェーズ 3 の推奨計算（既存一致でも高はブロッキングとして対応推奨）に乗せる",
       "files": []
     }
   ]

@@ -271,5 +271,6 @@
   "voiceEnabled": true,
   "autoMemoryEnabled": true,
   "skipWorkflowUsageWarning": true,
-  "verbose": false
+  "verbose": false,
+  "cleanupPeriodDays": 365
 }

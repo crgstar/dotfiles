@@ -19,11 +19,13 @@ process-retro 実行サマリ (<YYYY-MM-DD HH:MM:SS>)
     commit:  <sha> | —
   ...
 
-ブランチ: <branch_name> (base=<base>) — <commit_count> commits — <pushed to origin | push-failed (<reason>) | created and deleted>
-失敗カウント: comment-failed=<x>, close-failed=<x>, commit-failed=<x>
+ブランチ/PR (base=<base>):
+  process-retro-<run_ts>-<skill>: <n> commits — <PR #<num> <URL> | pr-failed (<reason>) | push-failed (<reason>)>
+  ...
+失敗カウント: comment-failed=<x>, close-failed=<x>, commit-failed=<x>, push-failed=<x>, pr-failed=<x>
 ```
 
 ## 注記
 
-- `commit_count == 0` のときは「作成して削除」と明示する
+- 採用ゼロでブランチを 1 つも作らなかったときは「ブランチ/PR: 作成なし」と明示する
 - `overflow=true` のときは末尾に「50 件上限到達: 残りは次回の実行で処理」を添える

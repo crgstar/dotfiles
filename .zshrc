@@ -15,6 +15,7 @@ abbreviations=(
   "cl" "claude"
   "ｃｌ" "claude"
   "じ" "zi"
+  "ime-dict" "open /Library/Input\ Methods/GoogleJapaneseInput.app/Contents/Resources/DictionaryTool.app"
 )
 
 expand-abbreviation() {

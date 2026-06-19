@@ -230,6 +230,16 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/mcp-error-toolsearch.sh"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "_tag": "ccstatusline-managed",

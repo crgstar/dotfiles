@@ -412,6 +412,8 @@ fi
 
 link_file "$DOTFILES_DIR/.claude/hooks/segment-allow.sh" \
           "$HOME/.claude/hooks/segment-allow.sh"
+link_file "$DOTFILES_DIR/.claude/hooks/mcp-error-toolsearch.sh" \
+          "$HOME/.claude/hooks/mcp-error-toolsearch.sh"
 
 # why: segment-allow.sh の safe-prefix を静的 allow から派生させる。
 #   抽出対象:

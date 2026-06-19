@@ -14,6 +14,7 @@ typeset -A abbreviations
 abbreviations=(
   "cl" "claude"
   "ｃｌ" "claude"
+  "じ" "zi"
 )
 
 expand-abbreviation() {

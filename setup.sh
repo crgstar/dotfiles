@@ -204,6 +204,11 @@ shopt -u nullglob
 link_file "$DOTFILES_DIR/.claude/skills/session-feedback/extract.sh" \
           "$HOME/.local/bin/session-feedback-extract"
 
+# ----- Git -----
+
+link_file "$DOTFILES_DIR/.gitignore_global" \
+          "$HOME/.gitignore_global"
+
 # ----- Shell -----
 
 link_file "$DOTFILES_DIR/.zshrc" \

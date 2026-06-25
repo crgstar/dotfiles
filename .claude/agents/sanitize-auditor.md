@@ -6,6 +6,9 @@ description: >
   process-retro §3.3(b)。「自分が今書いた差分に秘密が混ざっている」は同一コンテキストでは
   気づきにくいため別コンテキストで客観視する。process-retro のサニタイズと dotfiles の
   コミット前サニタイズから呼ぶ。
+  prompt に渡す入力: (1) 検査対象の diff (git diff 出力をそのまま貼る)
+  (2) 判定基準の出典ファイル絶対パス (process-retro/SKILL.md)。
+  どちらか欠けるとエージェントは即座に停止する。
 tools: Read, Grep
 model: haiku
 ---

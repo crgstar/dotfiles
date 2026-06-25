@@ -38,7 +38,19 @@
       "Bash(cup doc *)",
       "Bash(cup doc-pages *)",
       "Bash(cup folders *)",
-      "Bash(cup open *)"
+      "Bash(cup open *)",
+      "Bash(cup views *)",
+      "Bash(cup view *)",
+      "Bash(cup task-types *)",
+      "Bash(cup templates *)",
+      "Bash(cup list-templates *)",
+      "Bash(cup folder-templates *)",
+      "Bash(cup shared *)",
+      "Bash(cup list-comments *)",
+      "Bash(cup view-comments *)",
+      "Bash(cup completion *)",
+      "Bash(cup skill *)",
+      "Bash(cup help *)"
     ],
     "deny": [
       "Bash(cup delete *)",
@@ -48,7 +60,10 @@
       "Bash(cup space-delete *)",
       "Bash(cup tag-delete *)",
       "Bash(cup goal-delete *)",
-      "Bash(cup key-result-delete *)"
+      "Bash(cup key-result-delete *)",
+      "Bash(cup doc-delete *)",
+      "Bash(cup doc-page-delete *)",
+      "Bash(cup view-delete *)"
     ],
     "ask": [
       "Bash(cup update *)",
@@ -79,7 +94,23 @@
       "Bash(cup list-rename *)",
       "Bash(cup folder-rename *)",
       "Bash(cup space-rename *)",
-      "Bash(cup field-create *)"
+      "Bash(cup field-create *)",
+      "Bash(cup doc-create *)",
+      "Bash(cup doc-page-create *)",
+      "Bash(cup doc-page-edit *)",
+      "Bash(cup tag-update *)",
+      "Bash(cup list-from-template *)",
+      "Bash(cup view-create *)",
+      "Bash(cup view-update *)",
+      "Bash(cup merge *)",
+      "Bash(cup list-comment *)",
+      "Bash(cup view-comment *)",
+      "Bash(cup webhook *)",
+      "Bash(cup chat *)",
+      "Bash(cup filter *)",
+      "Bash(cup favorite *)",
+      "Bash(cup profile *)",
+      "Bash(cup config *)"
     ]
   },
   "enabledPlugins": {}

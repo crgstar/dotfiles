@@ -1,1 +1,2 @@
 - コミット前に `/code-review high --fix` すること
+  - markdown / スペック / ドキュメントのみの変更は high を使わない。散文のみの定義は skill-md-reviewer + sanitize で足りるので省く

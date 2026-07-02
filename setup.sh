@@ -307,6 +307,12 @@ else
 fi
 link_file "$claude_src" "$HOME/.claude/CLAUDE.md"
 
+# why: CLAUDE.md から @FABLE.md で import する。相対パス解決はインポート元と
+#      同じディレクトリ基準なので、CLAUDE.md (CLAUDE.merged.md) と同じ
+#      .claude/ 直下に置く。
+link_file "$DOTFILES_DIR/.claude/FABLE.md" \
+          "$HOME/.claude/FABLE.md"
+
 link_file "$DOTFILES_DIR/.claude/skills/docbase-mermaid/SKILL.md" \
           "$HOME/.claude/skills/docbase-mermaid/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/session-feedback/SKILL.md" \
@@ -429,6 +435,8 @@ link_file "$DOTFILES_DIR/.claude/hooks/mcp-error-toolsearch.sh" \
 #     Bash(cmd:*)       → "cmd" と "cmd *" の両方 (Claude Code の :* セマンティクス)
 #     Bash(cmd sub *)   → "cmd sub *"  (`git status *` / `gh pr view *` 等の多語サブコマンド)
 #     Bash(cmd sub:*)   → "cmd sub" と "cmd sub *"
+#     Bash(cmd sub +helper *) → "cmd sub +helper *" (gws の helper 命名規約 `+read`/`+append` 等。
+#         先頭 cmd には `+` を許さない / 連続 `++` 不可 / sub-word のみ単独 `+` を許す)
 #   除外対象 (内部に `*` や `/` を含む複合パターンは bash glob として 1 セグメント
 #   照合できないので hook の責務外):
 #     Bash(git -C * status *) / Bash(xargs -n* ls *) / Bash(cat */.mirugit/*)
@@ -445,7 +453,7 @@ if command -v jq &> /dev/null && [ -r "$HOME/.claude/settings.json" ]; then
     jq -r '
       .permissions.allow[]
       | select(type == "string")
-      | (capture("^Bash\\((?<cmd>[A-Za-z][A-Za-z0-9_-]*(?: [A-Za-z][A-Za-z0-9_-]*)*)(?<suf>:\\*| \\*)?\\)$")? // empty)
+      | (capture("^Bash\\((?<cmd>[A-Za-z][A-Za-z0-9_-]*(?: \\+?[A-Za-z][A-Za-z0-9_-]*)*)(?<suf>:\\*| \\*)?\\)$")? // empty)
       | if   .suf == ":*" then [.cmd, "\(.cmd) *"]
         elif .suf == " *" then ["\(.cmd) *"]
         else                   [.cmd]

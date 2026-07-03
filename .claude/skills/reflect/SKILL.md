@@ -15,7 +15,7 @@ description: >
 
 ## §1. 事前チェック
 
-`retro` SKILL.md §1 をそのまま実行する（参照。写経しない）。
+`retro` SKILL.md §1 を Read し、手順をそのまま実行する（Skill ツールでは呼ばない。写経しない）。
 
 ## §2. 抽出（retro-extractor を 1 回起動）
 

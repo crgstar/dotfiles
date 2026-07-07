@@ -197,7 +197,7 @@ printf '\n'
 # 文言非依存になり "Your questions have been answered" 等の表記揺れも取りこぼさない。
 # AskUserQuestion は preview 付きだと回答文字列に改行が混じり、行分割すると 2 問目
 # 以降が脱落するので改行を潰して 1 行化する。auq-web の回答は Bash 出力なので、その
-# 中から event+answers の JSON 行だけを拾う。
+# 中から event+answers の JSON を拾う (fromjson で読むので 1 行/複数行どちらでも可)。
 # Why skip is_error=true: rejected AUQ の tool_result は "The user doesn't want
 # to proceed..." メタテキストが入り、回答として読むと偽の "answer" になる。拒否は
 # `## askuserquestion rejections` で別建てしているので、ここでは除外する。
@@ -212,9 +212,9 @@ qa=$(jq -rs '
       | $names[.tool_use_id] as $tool
       | (.content | tr_text) as $c
       | if $tool == "AskUserQuestion" then ($c | gsub("\n"; " "))
-        elif (($tool=="Bash" or $tool=="BashOutput")
-              and ($c | test("\"event\"\\s*:\\s*\"answer\".*\"answers\"")))
-          then ($c | split("\n")[] | select(test("^\\s*\\{\"event\"\\s*:\\s*\"answer\".*\"answers\"")))
+        elif ($tool=="Bash" or $tool=="BashOutput") then
+          (try ($c | fromjson | select(.event == "answer" and has("answers")) | tojson) catch empty)
+          // ($c | split("\n")[] | try (fromjson | select(.event == "answer" and has("answers")) | tojson) catch empty)
         else empty end
     ]
   | if length==0 then "(none)" else (map("  " + .) | join("\n")) end

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.crgstar.reflect</string>
+    <!-- why zsh -c 経由: launchd は ProgramArguments 内の環境変数や ~ を展開
+         しないため、$HOME 展開をシェルに任せる。ログ出力先も同じ理由で
+         StandardOutPath ではなく run-headless.sh 自身の exec リダイレクトに置く -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-c</string>
+        <string>exec "$HOME/dotfiles/.claude/skills/reflect/run-headless.sh"</string>
+    </array>
+    <!-- 夜間 3:00 に 1 回。スリープ中に飛んだ回は復帰時に launchd が catch-up
+         するが、電源オフ中の回はスキップされる (次の 3:00 まで処理されない) -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+</dict>
+</plist>

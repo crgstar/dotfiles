@@ -1,5 +1,10 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(git ls-files *)",
+      "Bash(git -C * ls-files *)",
+      "Bash(git -C * ls-files)"
+    ],
     "ask": [
       "Bash(git add *)",
       "Bash(git commit *)",
@@ -9,5 +14,20 @@
       "Bash(gh api *)"
     ]
   },
-  "model": "claude-opus-4-6[1m]"
+  "hooks": {
+    "SessionEnd": [
+      {
+        "matcher": "clear|logout|prompt_input_exit|other",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/reflect-enqueue.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "model": "sonnet",
+  "askUserQuestionTimeout": "never",
+  "effortLevel": "medium"
 }

@@ -428,6 +428,22 @@ link_file "$DOTFILES_DIR/.claude/hooks/segment-allow.sh" \
 link_file "$DOTFILES_DIR/.claude/hooks/mcp-error-toolsearch.sh" \
           "$HOME/.claude/hooks/mcp-error-toolsearch.sh"
 
+# ----- reflect 無人実行 (SessionEnd enqueue + launchd 夜間ドライバ) -----
+
+link_file "$DOTFILES_DIR/.claude/hooks/reflect-enqueue.sh" \
+          "$HOME/.claude/hooks/reflect-enqueue.sh"
+mkdir -p "$HOME/.local/state/reflect"
+link_file "$DOTFILES_DIR/launchd/com.crgstar.reflect.plist" \
+          "$HOME/Library/LaunchAgents/com.crgstar.reflect.plist"
+# why 毎回 bootout→bootstrap: plist 変更を launchd に反映させる最短手順。
+# 未ロード時の bootout 失敗は無視してよい
+launchctl bootout "gui/$(id -u)/com.crgstar.reflect" 2>/dev/null || true
+if launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.crgstar.reflect.plist" 2>/dev/null; then
+  echo "launchd: com.crgstar.reflect を登録しました (毎日 3:00)"
+else
+  echo "警告: com.crgstar.reflect の launchctl bootstrap に失敗しました"
+fi
+
 # why: segment-allow.sh の safe-prefix を静的 allow から派生させる。
 #   抽出対象:
 #     Bash(cmd)         → "cmd" (exact)

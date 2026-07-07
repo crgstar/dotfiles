@@ -1,6 +1,6 @@
 ---
 name: baton
-description: 現在の会話を引き継ぎ書に圧縮し、別の Claude セッションが続きを再開できるようにする。引数なしまたは「次セッションの焦点」を渡すと会話全体を引き継ぎ、先頭トークンが `partial` のときは続くテキストを「引き継ぐ範囲」として、その塊だけを切り出す。`/baton` の明示呼出で起動。
+description: 現在の会話を引き継ぎ書に圧縮し、別の Claude セッションが続きを再開できるようにする。`/baton` の明示呼出で起動。
 argument-hint: "[partial <引き継ぐ範囲>] | <次セッションの焦点>"
 disable-model-invocation: true
 ---

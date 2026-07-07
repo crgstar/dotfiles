@@ -1,8 +1,8 @@
 ---
 name: retro
 description: >
-  1 タスクを終えた直後に、dotfiles で管理しているスキルの改善点を会話ログから拾い、
-  サニタイズして crgstar/dotfiles に GitHub issue を 1 通立てるスキル。
+  1 タスクを終えた直後に、dotfiles で管理しているスキルの改善点を
+  crgstar/dotfiles の GitHub issue として送るふりかえりスキル。
   `/retro` で明示起動する。生の会話はセッション内に留め、抽象化された
   日本語テキストだけが issue に出る。対象は dotfiles 管理スキルのみ。送信先は常に dotfiles
   (作業リポで走らせても issue は dotfiles 側に作る)。軽微な会話で拾うものが無ければ送信しない。
@@ -33,7 +33,7 @@ disable-model-invocation: true
    - `$CLAUDE_CODE_SESSION_ID` が空、またはファイルが存在しない場合は `セッション jsonl が見つかりません（CLAUDE_CODE_SESSION_ID=<値>）` と伝えて中断。
 4. **mirugit annotation file の特定**（任意）:
    - `~/.mirugit/review-session.json` を読み、`.token` を取得。ファイルが無い・token が無い場合はスキップ（このまま §2 へ）。
-   - `~/.mirugit/annotations/*/sessions/<token>.json` を glob で検索。1 件ヒットしたらそのパスを記憶。0 件 or 複数なら**スキップ**（複数ヒットは想定外なので、混乱を避けるため main では選ばない。`~/.mirugit/annotations/` 配下は作業リポと無関係な dotfiles でしか開けないので、main が中身を読んでサニタイズ判断するのは規律違反）。
+   - `~/.mirugit/annotations/*/sessions/<token>.json` を glob で検索。1 件ヒットしたらそのパスを記憶。0 件 or 複数なら**スキップ**（main が中身を読んで選ぶのは「生ログを main が読まない」規律に反するため）。
    - 見つかった場合のみ §2 で `retro-extractor` に追加で渡す。main では中身を読まない（生コメントが作業リポ固有情報を含み得るため）。
 5. **既存 open issue の指摘要約**（重複出荷の抑止）:
    - `gh issue list --repo crgstar/dotfiles --state open --limit 50 --json number,body` で取得し、各指摘の `Target skill` と `Description` の要旨を控える（本文は送信時にサニタイズ済みの公開テキストなので main が読んでよい）。
@@ -113,7 +113,7 @@ jsonl の解析・シグナル抽出・§3 サニタイズを `retro-extractor` 
 
 返却の前に、各候補の「現象」「改善方針」から次をすべて取り除く。
 
-**Why:** 送信先が PUBLIC なので、false positive で消す方が常に正しい。削りすぎても情報量が落ちるだけだが、漏らせば取り返しがつかない。迷ったら必ず削除。
+**Why:** 送信先が PUBLIC で、漏らせば取り返しがつかない。迷ったら必ず削除。
 
 | 対象 | 処理 |
 |---|---|
@@ -179,7 +179,9 @@ gh api \
   -F body=@"$draft"
 ```
 
-> **Why `.local/` か:** global gitignore（`~/.gitignore_global`）で `.local/` は追跡されない前提。万一 `git status` で `$draft` が untracked に出る環境なら、PUBLIC リポへの commit 事故を避けるため `/tmp` に退避してから投稿する。
+> **Why `.local/` か:** global gitignore（`~/.gitignore_global`）で `.local/` は追跡されない前提のため。
+>
+> 万一 `git status` で `$draft` が untracked に出る環境なら、PUBLIC リポへの commit 事故を避けるため `/tmp` に退避してから投稿する。
 
 `gh api` を使うのは最小権限（対象 repo の `Issues: write` のみ）で済むため。成功（exit 0）したら `rm "$draft"`。失敗時は `$draft` を残し、上記コマンドを再送用に案内する。
 

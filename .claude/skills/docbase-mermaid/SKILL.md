@@ -1,11 +1,11 @@
 ---
 name: docbase-mermaid
-description: DocBase 上で Mermaid 図を書く際の注意点と推奨記法。DocBase にメモを作成・更新するときに Mermaid コードブロック(フローチャート、ER図、シーケンス図等)を含める場合に自動適用する。DocBase、Mermaid、フロー図、ダイアグラムに関するタスクで使用。
+description: DocBase 上で Mermaid 図を書く際の注意点と推奨記法。DocBase にメモを作成・更新するときに Mermaid コードブロック(フローチャート、ER図、シーケンス図等)を含める場合に自動適用する。DocBase、Mermaid、フロー図、ダイアグラムに関するタスクで使用。DocBase 以外の場所に書く Mermaid 図は対象外。
 ---
 
 # DocBase Mermaid 記法ガイド
 
-DocBase は Mermaid **v11.6.0** を使用(CDN: `cdn.docbase.io/mermaid@11.6.0`)。v11 固有の制約あり。
+DocBase は Mermaid **v11.6.0** を使用。v11 固有の制約あり。
 
 ## 必須: リスト構文の回避
 
@@ -42,4 +42,4 @@ OK: SPACE ||--o{ SUBSCRIPTION : has
 
 ## 対応チャート種別
 
-graph / flowchart, sequenceDiagram, erDiagram, gantt, classDiagram, stateDiagram-v2, pie
+graph / flowchart, sequenceDiagram, erDiagram, gantt, classDiagram, stateDiagram-v2, pie（列挙外の図種別は未検証）

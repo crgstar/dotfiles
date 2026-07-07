@@ -20,28 +20,6 @@ Claude Code の追加ワーキングディレクトリ (`additionalDirectories` 
 にまたがって安全に管理するためのスキル。Claude Code の `--add-dir` フラグおよび
 `additionalDirectories` 設定の永続化版を扱う。
 
-## なぜこのスキルが必要か
-
-`additionalDirectories` を複数リポに展開する作業には以下の落とし穴がある:
-
-- **正しいスキーマパス**: 設定キーは `.permissions.additionalDirectories` の位置にあり、
-  トップレベルの `.additionalDirectories` ではない（バイナリ内のエラーメッセージで
-  `permissions.additionalDirectories` と明示されている）。トップレベルに置くと Claude Code
-  起動時に自動正規化されて `.permissions.` 配下に移動されるため、見かけ上は動くが、書き込み
-  時点では効いていない期間が生じる。スクリプトは最初から正しい位置に書く。
-- **既存設定の保護**: 既に `permissions.allow` / `hooks` / `outputStyle` 等が書かれている
-  settings.local.json を雑に上書きすると別機能が壊れる。jq merge が必須。
-- **書き込み先の判断**: 絶対パスはマシン固有なので、commit 対象の `settings.json` ではなく
-  gitignore 対象の `settings.local.json` に書くべき。これを毎回考えるのは無駄。
-- **self-exclusion**: グループでクロスリンクするとき、各リポは「自分を除いた他全部」を持つ
-  必要があり、手作業だと取りこぼしやすい。
-- **CLAUDE.md ロードの opt-in 性**: 追加ディレクトリの `CLAUDE.md` はデフォルトでは読まれず、
-  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` 環境変数の opt-in。この事実を意識せず
-  add-dir すると「コンテキストが汚れる」と誤認されやすい。
-
-これらを毎回手で書き直すのは時間の無駄かつバグの温床。スクリプトに固めることで、Claude は
-オーケストレーションだけに集中できる。
-
 ## スキーマ参照
 
 設定ファイル (`.claude/settings.local.json`) における `additionalDirectories` の正しい位置:

@@ -74,7 +74,7 @@ B: 適用する番号を指定してください（例: 全部 / 1,3 / なし）
 
 **A**: retro §4「本文の組み立てと送信」に従う（参照）。issue 本文に入れるのは A ブロック内の `### 指摘 N` 群と `指摘件数:` 行だけ（`## A:` 見出しは外す。process-retro のパーサ互換のため）。
 
-**B**: 承認された番号だけ書き込む。memory は auto-memory 規約（MEMORY.md index 更新含む）、CLAUDE.md / 既存ファイル編集は session-feedback §3.4 の注意（既存章立て尊重・重複チェック・相対日付の絶対化）に従う（参照）。
+**B**: 承認された番号だけ書き込む。memory は auto-memory 規約（MEMORY.md index 更新含む）、CLAUDE.md / 既存ファイル編集は session-feedback §3.4 の注意に従う（参照）。
 
 `~/.claude/CLAUDE.md` は dotfiles（PUBLIC）管理なので、追記内容に作業リポ固有情報を書かない（コミット時の sanitize 規約が最終防壁だが、書かないのが先）。
 

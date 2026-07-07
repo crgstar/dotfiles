@@ -1,8 +1,7 @@
 ---
 name: sentinel
 description: >
-  未コミット差分を 4 並列エージェント（実装品質 / テスト設計 / コメント精査 / feature-dev:code-reviewer）で多角評価し、
-  兄弟ファイルとの突き合わせを経て auq-web で「説明 + 対応可否」を 1 画面提示するスキル。
+  未コミット差分を複数の並列レビューエージェントで多角評価し、指摘ごとの対応可否をユーザに問うレビュースキル。
   `/code-review max` より重い多角レビューを明示的に求められたときに使う。
   「sentinelして」「品質チェック」「全方位レビュー」「多角的にレビュー」「実装もテストも見て」「4 観点でレビュー」等のリクエストで発動。
   対象外: /simplify 指定、GitHub PR レビュー、単一観点のみの依頼（テストだけ等）、
@@ -41,7 +40,7 @@ description: >
   - 重要度は `.claude/skills/shared/review-severity.md` の定義に従う。**本文をプロンプトに直接含める**（独立コンテキストの subagent には参照パスが届かないため）
 - **2. テスト設計**: `/test-design-guide` に従う（観点はそちらに集約）
 - **3. コメント精査**: `/comment-scrutiny` に従う。差分内のコメントを「消すと壊れる」かで分類
-- **4. バグ・規約レビュー**: `feature-dev:code-reviewer`（named agent・tools 制限済み・Bash なし）に差分全文をプロンプトで渡す。agent は CLAUDE.md 準拠・バグ・セキュリティを confidence≥80 で絞って報告する。出力は Critical / Important の 2 段で日本語
+- **4. バグ・規約レビュー**: `feature-dev:code-reviewer`（named agent・tools 制限済み・Bash なし）に差分全文をプロンプトで渡す。agent は CLAUDE.md 準拠・バグ・セキュリティを自身の基準で絞って報告する。出力は Critical / Important の 2 段で日本語（フェーズ 3 の読み替えが前提とする形式）
 
 ## フェーズ 3: 一次情報との突き合わせ（必須）
 

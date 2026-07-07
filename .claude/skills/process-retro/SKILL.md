@@ -1,10 +1,8 @@
 ---
 name: process-retro
 description: >
-  retro が立てた dotfiles スキル改善 issue を crgstar/dotfiles から順に取り、
-  各指摘を判定 → SKILL.md を Edit → skill-md-guide と sanitize-auditor エージェントで
-  レビュー → スキル単位ブランチに指摘ごとのコミットを積む → ブランチごとに PR を
-  作成するスキル。`/process-retro` で明示起動、Routine 起動も同じ手順。
+  retro が立てた dotfiles スキル改善 issue を crgstar/dotfiles から順に処理し、
+  SKILL.md への反映と PR 作成まで行うスキル。`/process-retro` で明示起動、Routine 起動も同じ手順。
   対象は dotfiles 管理スキルのみ。送信元 (retro) と対をなす受け手側。
 ---
 
@@ -85,24 +83,9 @@ gh issue list --repo crgstar/dotfiles --state open --limit 50 \
 
 ### §3.1 issue 本文を読み取る 
 
-retro 側の出力スキーマ:
+issue 本文は retro SKILL.md §2.2 の出力スキーマ（`### 指摘 N` ブロックの連なり + 末尾の `指摘件数: <N>`）に従って書かれている。スキーマの詳細は retro 側を正とする。
 
-```text
-# dotfiles スキル ふりかえり（自動生成）
-
-### 指摘 1
-**Target skill:** <skill-name>
-**Category:** 曖昧 | 分岐漏れ | デフォルト不適切 | ルール衝突 | その他
-**Description:** <1 段落>
-**Suggested fix direction:** <1 段落>
-
-### 指摘 2
-...
-
-指摘件数: <N>
-```
-
-抽出して指摘ごとの記録 (record) に固定する。実行中はこの記録だけを参照する:
+各指摘から以下を抽出して指摘ごとの記録 (record) に固定する。実行中はこの記録だけを参照する:
 
 - `target_skill`: 対象スキル名 (このあと `.claude/skills/<target_skill>/SKILL.md` を編集)
 - `category`: §3.2 判定の参考
@@ -136,8 +119,8 @@ retro 側の出力スキーマ:
 | R6 | 方針違反: 機密漏洩を促す / 既存のサニタイズ規約を無効化する / dotfiles の編集方針に反する |
 | R7 | 一回性: 指摘がその場の文脈・好みに留まり、「初見の Claude の行動を変える最小の編集」を 1 文で言えない |
 
-どれにも該当しなければ採用 (`accept`)。採用はデフォルトではない — これまでの運用でほぼ全件
-採用となりスキルが指摘のたびに肥大したので、R7 のバーを越えられない指摘は迷わず却下する。
+どれにも該当しなければ採用 (`accept`)。採用はデフォルトではない — 全件採用に流れると
+スキルが指摘のたびに肥大するため、R7 のバーを越えられない指摘は迷わず却下する。
 
 R1 で読む「SKILL.md」は編集 base のもの (この実行で当該スキルのブランチを既に作っていれば
 その先頭、なければ `$base`)。作業ツリー上の別ブランチの内容で判定しない。加えて

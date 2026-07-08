@@ -8,9 +8,18 @@
 
 set -u
 
+# NOTE: run-headless.sh の done_lines_of と同一実装。変えるときは両方揃える
+done_lines_of() { # $1=sid $2=done ファイル。出力: ""(未処理) / "inf"(恒久 done) / 記録済み最大行数
+  [ -f "$2" ] || return 0
+  awk -v s="$1" '
+    $1 == s { if (NF < 2) inf = 1; else if ($2 + 0 > max) max = $2 + 0; found = 1 }
+    END { if (inf) print "inf"; else if (found) print max + 0 }
+  ' "$2"
+}
+
 enqueue() {
   local state_dir queue done_file min_lines
-  local input session_id transcript cwd lines
+  local input session_id transcript cwd lines recorded min_growth
   state_dir="${REFLECT_STATE_DIR:-$HOME/.local/state/reflect}"
   queue="$state_dir/queue.jsonl"
   done_file="$state_dir/done"
@@ -32,13 +41,23 @@ enqueue() {
   [ -n "$session_id" ] || return 0
   [ -f "$transcript" ] || return 0
 
-  lines=$(wc -l <"$transcript") || return 0
+  lines=$(($(wc -l <"$transcript"))) || return 0
   [ "$lines" -ge "$min_lines" ] || return 0
 
-  # 冪等: 同一セッションが既にキュー/処理済みにあれば足さない
+  # 冪等: 同一セッションが既にキューにあれば足さない
   # (resume 後の再終了や hook の重複発火で二重処理しないため)
   [ -f "$queue" ] && grep -qF "\"$session_id\"" "$queue" && return 0
-  [ -f "$done_file" ] && grep -qF "$session_id" "$done_file" && return 0
+
+  # done は「<sid> <処理時の行数>」形式 (行数なしの旧形式は恒久 done)。
+  # 処理済みでも transcript が閾値以上伸びていれば再 enqueue する
+  # (処理後に resume された会話の続きを取りこぼさないため。差分の抽出範囲は
+  # ドライバが --since-line で渡し、SKILL.md §6 が接頭辞の重複抽出を抑える)
+  recorded=$(done_lines_of "$session_id" "$done_file")
+  if [ -n "$recorded" ]; then
+    [ "$recorded" = "inf" ] && return 0
+    min_growth="${REFLECT_MIN_GROWTH:-$min_lines}"
+    [ $((lines - recorded)) -ge "$min_growth" ] || return 0
+  fi
 
   mkdir -p "$state_dir"
   jq -cn --arg sid "$session_id" --arg path "$transcript" --arg cwd "$cwd" \
@@ -79,18 +98,38 @@ self_test() {
 
   mkdir -p "$tmpdir/state"
   echo "test-session-3" >>"$tmpdir/state/done"
-  run_case "done 済みは skip" 1 \
+  run_case "行数なしの done (旧形式) は恒久 skip" 1 \
     "$(jq -c '.session_id = "test-session-3"' <<<"$payload")"
 
+  echo "test-session-3g 30" >>"$tmpdir/state/done"
+  run_case "done 記録 30 行 → 100 行 (閾値以上の成長) は再 enqueue" 2 \
+    "$(jq -c '.session_id = "test-session-3g"' <<<"$payload")"
+
+  echo "test-session-3s 80" >>"$tmpdir/state/done"
+  run_case "done 記録 80 行 → 100 行 (閾値未満の成長) は skip" 2 \
+    "$(jq -c '.session_id = "test-session-3s"' <<<"$payload")"
+
+  printf 'test-session-3m 30\ntest-session-3m\n' >>"$tmpdir/state/done"
+  run_case "行数付きと旧形式が混在する sid は inf 優先で skip" 2 \
+    "$(jq -c '.session_id = "test-session-3m"' <<<"$payload")"
+
+  printf 'test-session-3x 20\ntest-session-3x 90\n' >>"$tmpdir/state/done"
+  run_case "複数記録は最大行数と比較 (90→100 は閾値未満) で skip" 2 \
+    "$(jq -c '.session_id = "test-session-3x"' <<<"$payload")"
+
+  echo "test-session-3z 0" >>"$tmpdir/state/done"
+  run_case "記録 0 行は未処理でなく 0 として扱い、100 行成長で再 enqueue" 3 \
+    "$(jq -c '.session_id = "test-session-3z"' <<<"$payload")"
+
   seq 10 >"$transcript"
-  run_case "行数閾値未満は skip" 1 \
+  run_case "行数閾値未満は skip" 3 \
     "$(jq -c '.session_id = "test-session-4"' <<<"$payload")"
 
-  run_case "transcript 不在は skip" 1 \
+  run_case "transcript 不在は skip" 3 \
     '{"session_id": "test-session-5", "transcript_path": "/nonexistent", "cwd": "/tmp"}'
 
   seq 100 >"$transcript"
-  run_case "2 件目のセッションは enqueue される" 2 \
+  run_case "2 件目のセッションは enqueue される" 4 \
     "$(jq -c '.session_id = "test-session-6"' <<<"$payload")"
 
   echo "self-test: pass=$pass fail=$fail"

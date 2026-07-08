@@ -15,6 +15,7 @@
 #   REFLECT_ISSUE_REPO issue 投稿先 (default: crgstar/dotfiles)
 #   REFLECT_MODEL      ヘッドレスのモデル (default: sonnet)
 #   REFLECT_TIMEOUT    claude 1 件あたりの上限秒 (default: 3600)
+#   REFLECT_MIN_GROWTH 差分再処理とみなす最小成長行数 (default: 50。hook と共有)
 #   REFLECT_DRY_RUN    1 なら gh api POST せずログに出すだけ
 
 set -u
@@ -32,6 +33,7 @@ CLAUDE_BIN="${REFLECT_CLAUDE_BIN:-$HOME/.local/bin/claude}"
 ISSUE_REPO="${REFLECT_ISSUE_REPO:-crgstar/dotfiles}"
 MODEL="${REFLECT_MODEL:-sonnet}"
 TIMEOUT_SEC="${REFLECT_TIMEOUT:-3600}"
+MIN_GROWTH="${REFLECT_MIN_GROWTH:-50}"
 DOTFILES_DIR="$HOME/dotfiles"
 # why 2 回で打ち切り: 同じ transcript で毎晩失敗し続けると token を無限に燃やす。
 # 2 回失敗した entry は hold に落として人間判断に回す
@@ -114,7 +116,33 @@ attempts_of() {
   c=$(grep -cF "$1" "$ATTEMPTS" 2>/dev/null)
   echo "${c:-0}"
 }
-mark_done() { echo "$1" >>"$DONE"; }
+
+# NOTE: reflect-enqueue.sh の done_lines_of と同一実装。変えるときは両方揃える
+# (テストは hook 側の --self-test が担う)
+done_lines_of() { # $1=sid。出力: ""(未処理) / "inf"(恒久 done) / 記録済み最大行数
+  [ -f "$DONE" ] || return 0
+  awk -v s="$1" '
+    $1 == s { if (NF < 2) inf = 1; else if ($2 + 0 > max) max = $2 + 0; found = 1 }
+    END { if (inf) print "inf"; else if (found) print max + 0 }
+  ' "$DONE"
+}
+
+# 処理確定 (done) した sid の失敗カウントを消す。
+# why: 差分再処理で同じ sid が別ラウンドとして戻るため、前ラウンドの失敗数を
+# 持ち越すと新ラウンドのリトライ予算が失われる
+clear_attempts() {
+  [ -f "$ATTEMPTS" ] || return 0
+  grep -vF "$1" "$ATTEMPTS" >"$ATTEMPTS.tmp" || true
+  mv "$ATTEMPTS.tmp" "$ATTEMPTS"
+}
+
+# $1=sid $2=処理済み行数の watermark (省略時は恒久 done = 以後成長しても再処理しない)。
+# watermark 付きで記録しておくと、その行以降に transcript が伸びたとき
+# enqueue hook が差分再処理として再投入できる
+mark_done() {
+  echo "$1${2:+ $2}" >>"$DONE"
+  clear_attempts "$1"
+}
 
 log "=== run 開始 (model=$MODEL repo=$ISSUE_REPO dry_run=${REFLECT_DRY_RUN:-0}) ==="
 
@@ -159,7 +187,6 @@ else
     fi
     path=$(jq -r '.path // empty' <<<"$entry")
     cwd=$(jq -r '.cwd // empty' <<<"$entry")
-    grep -qF "$sid" "$DONE" 2>/dev/null && continue
 
     if [ ! -f "$path" ]; then
       log "$sid: transcript 消失 ($path)。done 扱い"
@@ -167,7 +194,26 @@ else
       continue
     fi
 
-    log "$sid: 処理開始 ($path)"
+    # 読取失敗を 0 行と誤認すると「成長なし」として黙って捨ててしまうので requeue
+    if ! cur_lines=$(wc -l <"$path" 2>/dev/null); then
+      log "$sid: transcript 読取失敗。queue へ戻して次回リトライ"
+      printf '%s\n' "$entry" >>"$QUEUE"
+      continue
+    fi
+    # done 記録行数と比較し、閾値以上伸びていれば差分再処理、それ以外は skip
+    # (算術展開は wc 出力の先頭空白を落とすため)
+    cur_lines=$((cur_lines))
+    recorded=$(done_lines_of "$sid")
+    since_arg=""
+    if [ -n "$recorded" ]; then
+      [ "$recorded" = "inf" ] && continue
+      # hook と同じ成長閾値を適用 (クラッシュ残骸の合流 entry が数行の成長で
+      # フル claude 起動を焼くのを防ぐ)
+      [ $((cur_lines - recorded)) -ge "$MIN_GROWTH" ] || continue
+      [ "$recorded" -gt 0 ] && since_arg=" --since-line $recorded"
+    fi
+
+    log "$sid: 処理開始 ($path)${since_arg:+ [再処理: $recorded 行以降の差分]}"
     # why cd $DOTFILES_DIR: ヘッドレスでは cwd + additionalDirectories (~/.claude)
     # だけが読める。dotfiles を cwd にすると SKILL.md 群と transcript
     # (~/.claude/projects/) の両方が追加権限なしで読める。
@@ -175,7 +221,7 @@ else
     # 翌晩以降も塞ぐので上限必須 (SIGALRM で claude ごと落とす)
     out=$(cd "$DOTFILES_DIR" && REFLECT_HEADLESS=1 \
       perl -e 'alarm shift @ARGV; exec @ARGV' "$TIMEOUT_SEC" \
-      "$CLAUDE_BIN" -p "/reflect --auto $path" \
+      "$CLAUDE_BIN" -p "/reflect --auto $path$since_arg" \
       --permission-mode dontAsk --model "$MODEL" </dev/null 2>>"$LOG")
     rc=$?
 
@@ -185,8 +231,11 @@ else
         log "$sid: claude 失敗 (exit=$rc) が $MAX_ATTEMPTS 回目。hold へ"
         printf '%s\n' "$out" >"$HOLD/$sid-error.txt"
         # why ブレース必須: 直後が全角文字だと bash が変数名境界を誤認識する
+        # watermark は前回値のまま (抽出に成功していない範囲を「処理済み」に
+        # すると、以後の --since-line がその範囲のシグナルを恒久に落とすため。
+        # 次に transcript が伸びたラウンドで失敗範囲ごと再挑戦される)
         inbox_append "$(date '+%Y-%m-%d') $sid" <<<"処理失敗 x${MAX_ATTEMPTS}。hold/$sid-error.txt を確認"
-        mark_done "$sid"
+        mark_done "$sid" "${recorded:-0}"
       else
         log "$sid: claude 失敗 (exit=$rc)。queue へ戻して次回リトライ"
         printf '%s\n' "$entry" >>"$QUEUE"
@@ -199,8 +248,9 @@ else
       # マーカーなし = スキルが指示に従えていない。誤投稿より保留に倒す
       log "$sid: SUMMARY マーカーなし (パース不能)。hold へ"
       printf '%s\n' "$out" >"$HOLD/$sid-parse-error.txt"
+      # watermark は前回値のまま (理由は失敗パスと同じ)
       inbox_append "$(date '+%Y-%m-%d') $sid" <<<"出力がパース不能。hold/$sid-parse-error.txt を確認"
-      mark_done "$sid"
+      mark_done "$sid" "${recorded:-0}"
       continue
     fi
 
@@ -234,7 +284,7 @@ else
       printf '%s\n' "$summary"
       [ -n "$status_line" ] && printf '\n%s\n' "$status_line"
     } | inbox_append "$(date '+%Y-%m-%d') $sid ($cwd)"
-    mark_done "$sid"
+    mark_done "$sid" "$cur_lines"
     log "$sid: 完了"
   done 3<"$PROCESSING"
 

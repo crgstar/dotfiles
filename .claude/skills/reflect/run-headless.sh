@@ -35,6 +35,10 @@ MODEL="${REFLECT_MODEL:-sonnet}"
 TIMEOUT_SEC="${REFLECT_TIMEOUT:-3600}"
 MIN_GROWTH="${REFLECT_MIN_GROWTH:-50}"
 DOTFILES_DIR="$HOME/dotfiles"
+# why 単一定義: extract_block と split_memory_blocks の状態機械は同じタグ集合を
+# 見ないと「片方だけが開始マーカーを認識する」ずれが起き、引用と実ブロックの
+# 判定が関数間で食い違う。タグ追加時はここだけ変える
+REFLECT_TAGS='OUTBOX|HOLD|SUMMARY|MEMORY'
 # why 2 回で打ち切り: 同じ transcript で毎晩失敗し続けると token を無限に燃やす。
 # 2 回失敗した entry は hold に落として人間判断に回す
 MAX_ATTEMPTS=2
@@ -44,11 +48,412 @@ MAX_ATTEMPTS=2
 export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin"
 
 mkdir -p "$STATE_DIR" "$HOLD" "$OUTBOX" "$(dirname "$INBOX")"
-exec >>"$LOG" 2>&1
 
 # why stderr 出力: post_issue 等は $(...) で stdout を捕まえられるので、
 # stdout に log を混ぜると戻り値 (issue URL) に混入する
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2; }
+
+extract_block() { # $1=タグ名 stdin=claude 出力。マーカー行の間だけを出す
+  # why 状態機械: ブロック本文に引用された別タグの開始マーカー (SKILL.md の
+  # 例示を含む transcript 等) を新規ブロック開始として拾うと、HOLD に隔離した
+  # 内容の一部を OUTBOX として投稿しうる。「最初に開いたブロックが閉じるまで、
+  # 他の開始マーカーは本文扱い」にして構造を一意にする
+  awk -v tag="$1" -v tags="$REFLECT_TAGS" '
+    inblk == "" && $0 ~ ("^<<<REFLECT-(" tags ")$") { inblk = substr($0, 4); next }
+    inblk != "" && $0 == inblk ">>>" { inblk = ""; next }
+    inblk == "REFLECT-" tag { print }
+  '
+}
+
+split_memory_blocks() { # $1=outdir stdin=claude 出力。REFLECT-MEMORY を 1 件 1 ファイル (mem-N) に分割
+  # why extract_block とは別関数: MEMORY は同一出力に複数件来る。タグ内容を
+  # 連結して素通しする extract_block では 1 件目と 2 件目が結合されてしまうため、
+  # open ごとに出力先ファイルを切り替える。状態機械の性質 (最初に開いたブロックが
+  # 閉じるまで他の開始マーカーは本文扱い) は extract_block と同じにする
+  local outdir="$1"
+  awk -v outdir="$outdir" -v tags="$REFLECT_TAGS" '
+    inblk == "" && $0 ~ ("^<<<REFLECT-(" tags ")$") {
+      tag = substr($0, 4)
+      inblk = tag
+      if (tag == "REFLECT-MEMORY") {
+        n++; outfile = outdir "/mem-" n
+        # why 空ファイルの実体化: 本文 0 行のブロックは print が一度も走らず
+        # ファイル自体が生まれない = hold にも log にも痕跡が残らず消える。
+        # 空でも実体を作れば process_memory_block の検証で hold に落ちる
+        printf "" > outfile
+      }
+      next
+    }
+    inblk != "" && $0 == inblk ">>>" { inblk = ""; next }
+    inblk == "REFLECT-MEMORY" { print > outfile }
+  '
+}
+
+memory_path_ok() { # $1=path。許可条件をすべて満たすときだけ 0 (純粋関数)
+  local path="$1" root rest seg1 rest2 fname
+  root="${REFLECT_MEMORY_ROOT:-$HOME/.claude/projects}"
+
+  case "$path" in
+    *//*) return 1 ;; # 空セグメント
+  esac
+  case "$path" in
+    */../*|*/..|../*|..) return 1 ;; # .. セグメント
+  esac
+  case "$path" in
+    */./*|*/.|./*|.) return 1 ;; # . セグメント (prefix 直下等への正規化ずらしを防ぐ)
+  esac
+  case "$path" in
+    "$root"/*) ;;
+    *) return 1 ;; # 許可 prefix 外
+  esac
+
+  rest="${path#"$root"/}"          # <seg1>/memory/<file>.md
+  seg1="${rest%%/*}"
+  [ -n "$seg1" ] || return 1
+  [ "$seg1" != "$rest" ] || return 1 # memory/ 以下が存在しない (1 セグメントで終わっている)
+
+  rest2="${rest#*/}"               # memory/<file>.md
+  case "$rest2" in
+    memory/*) ;;
+    *) return 1 ;;
+  esac
+  fname="${rest2#memory/}"
+  case "$fname" in
+    */*) return 1 ;;               # memory/ 配下にサブディレクトリ
+    *.md) ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+process_memory_block() { # $1=blockfile $2=sid $3=n。結果行を stdout に 1 行 (成否は戻り値)
+  local blockfile="$1" sid="$2" n="$3"
+  local mode="" file="" index="" fname="" header_done=0 line body_file fail=""
+  body_file=$(mktemp "${TMPDIR:-/tmp/}reflect-mem-body-XXXXXX")
+
+  # why ヘッダ読取: mode/file/index は先頭の "---" 行までのメタデータ。
+  # それ以降は memory ファイル本文 (frontmatter 含む) なので一字一句そのまま
+  # body_file に落とす (自身も "---" を含みうるが、以降は全部本文として扱う)
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$header_done" -eq 1 ]; then
+      printf '%s\n' "$line" >>"$body_file"
+      continue
+    fi
+    if [ "$line" = "---" ]; then
+      header_done=1
+      continue
+    fi
+    case "$line" in
+      mode:*) mode="${line#mode:}"; mode="${mode# }" ;;
+      file:*) file="${line#file:}"; file="${file# }" ;;
+      index:*) index="${line#index:}"; index="${index# }" ;;
+    esac
+  done <"$blockfile"
+
+  case "$mode" in
+    create|update) ;;
+    *) fail="不正な mode: ${mode:-<空>}" ;;
+  esac
+  # 本文空 = "---" 区切り欠落かモデルの返却不正。空の memory を確定させない
+  if [ -z "$fail" ] && [ ! -s "$body_file" ]; then
+    fail="本文が空 (--- 区切り欠落の疑い)"
+  fi
+  [ -n "$fail" ] || memory_path_ok "$file" || fail="許可パス外の file: $file"
+  # create は index 必須 (MEMORY.md 未掲載のオーファン memory はどこからも辿れない)
+  if [ -z "$fail" ] && [ "$mode" = "create" ] && [ -z "$index" ]; then
+    fail="create だが index が空"
+  fi
+  # index が file と別名を指すと重複判定 grep が永遠に効かず、リンク切れも黙認される
+  if [ -z "$fail" ] && [ -n "$index" ]; then
+    fname=$(basename "$file")
+    case "$index" in
+      *"]($fname)"*) ;;
+      *) fail="index が file 名と不一致: $index" ;;
+    esac
+  fi
+  if [ -z "$fail" ] && [ "$mode" = "create" ] && [ -e "$file" ]; then
+    fail="create だが既存ファイルと衝突: $file" # モデルの重複見落としを黙って上書きしない
+  fi
+  if [ -z "$fail" ] && [ "$mode" = "update" ] && [ ! -e "$file" ]; then
+    fail="update だが対象ファイルが未存在: $file"
+  fi
+
+  if [ -n "$fail" ]; then
+    rm -f "$body_file"
+    cp "$blockfile" "$HOLD/$sid-memory-$n.txt"
+    log "$sid: memory ブロック $n 失敗 ($fail)"
+    echo "memory 失敗: hold/$sid-memory-$n.txt"
+    return 1
+  fi
+
+  if [ "${REFLECT_DRY_RUN:-}" = "1" ]; then
+    rm -f "$body_file"
+    log "DRY_RUN: memory 書き込みをスキップ ($file, $mode)"
+    echo "memory 書き込み: $file ($mode, dry-run)"
+    return 0
+  fi
+
+  local memdir tmp="" memmd
+  memdir=$(dirname "$file")
+  # why 失敗検出: mkdir/mktemp/cat/mv のどれが落ちても素通しすると、書けていない
+  # memory を「書き込み成功」と報告して朝の運用が気づけない (権限不足等で実証済み)。
+  # why tmp 経由の mv: 書き込み途中でクラッシュしても半端な内容を確定させない
+  if ! mkdir -p "$memdir" \
+    || ! tmp=$(mktemp "$memdir/.reflect-mem-XXXXXX") \
+    || ! cat "$body_file" >"$tmp" \
+    || ! mv "$tmp" "$file"; then
+    [ -n "$tmp" ] && rm -f "$tmp"
+    rm -f "$body_file"
+    cp "$blockfile" "$HOLD/$sid-memory-$n.txt"
+    log "$sid: memory ブロック $n 失敗 (書き込みエラー: $file)"
+    echo "memory 失敗: hold/$sid-memory-$n.txt"
+    return 1
+  fi
+  rm -f "$body_file"
+
+  if [ -n "$index" ]; then
+    memmd="$memdir/MEMORY.md"
+    if [ ! -f "$memmd" ] || ! grep -qF "]($fname)" "$memmd"; then
+      if ! printf '%s\n' "$index" >>"$memmd"; then
+        # memory 本体は書けているので失敗にはしない (index は hold より log と
+        # inbox 行から人間が復旧する方が速い)
+        log "$sid: MEMORY.md への index 追記失敗 ($memmd)"
+        echo "memory 書き込み: $file ($mode, index 追記失敗)"
+        return 0
+      fi
+    fi
+  fi
+
+  log "$sid: memory 書き込み成功 -> $file ($mode)"
+  echo "memory 書き込み: $file ($mode)"
+  return 0
+}
+
+self_test() {
+  local tmpdir pass=0 fail=0
+  tmpdir=$(mktemp -d "${TMPDIR:-/tmp/}reflect-headless-test-XXXXXX")
+  trap "rm -rf \"$tmpdir\"" EXIT
+
+  # why local shadow: memory_path_ok / process_memory_block は
+  # REFLECT_MEMORY_ROOT / HOLD をそのまま参照する。bash の動的スコープにより
+  # ここで local 宣言すれば呼び出し先にも見えるので、実 $HOME に触れずに
+  # 検証できる (env 上書きの代わり)
+  local REFLECT_MEMORY_ROOT="$tmpdir/root"
+  local HOLD="$tmpdir/hold"
+  mkdir -p "$REFLECT_MEMORY_ROOT" "$HOLD"
+
+  ok() { pass=$((pass + 1)); }
+  ng() { fail=$((fail + 1)); echo "FAIL: $1"; }
+
+  make_block() { # $1=out $2=mode $3=file $4=index $5=body
+    {
+      echo "mode: $2"
+      echo "file: $3"
+      echo "index: $4"
+      echo "---"
+      printf '%s\n' "$5"
+    } >"$1"
+  }
+
+  # --- split_memory_blocks ---
+  local mixed="$tmpdir/mixed.txt" outdir="$tmpdir/split1" n_files
+  mkdir -p "$outdir"
+  cat >"$mixed" <<'EOF'
+<<<REFLECT-MEMORY
+mode: create
+file: /tmp/x/memory/a.md
+index: - [A](a.md) — hook
+---
+body line
+<<<REFLECT-MEMORY
+quoted nested marker (not a new block)
+REFLECT-MEMORY>>>
+<<<REFLECT-SUMMARY
+ふりかえり: スキル指摘 0 件（0 件） / 行動 0 件（memory 書き込み 1 件 / 対話処理待ち 0 件）
+REFLECT-SUMMARY>>>
+<<<REFLECT-MEMORY
+mode: update
+file: /tmp/x/memory/b.md
+index:
+---
+body2
+REFLECT-MEMORY>>>
+EOF
+  split_memory_blocks "$outdir" <"$mixed"
+  n_files=$(find "$outdir" -maxdepth 1 -type f -name 'mem-*' | wc -l | tr -d ' ')
+  if [ "$n_files" = "2" ]; then ok; else ng "split: MEMORY 2 件になるはず (実際 ${n_files:-0})"; fi
+  if grep -qF "quoted nested marker" "$outdir/mem-1" 2>/dev/null; then
+    ok
+  else
+    ng "split: 引用マーカーが本文から消えた/誤って分離された"
+  fi
+  if grep -qF "mode: update" "$outdir/mem-2" 2>/dev/null; then
+    ok
+  else
+    ng "split: 2 件目の内容が違う"
+  fi
+
+  # --- memory_path_ok ---
+  if memory_path_ok "$REFLECT_MEMORY_ROOT/proj/memory/foo.md"; then ok; else ng "memory_path_ok: 正常パスが NG"; fi
+  if ! memory_path_ok "$REFLECT_MEMORY_ROOT/proj/../etc/memory/foo.md"; then ok; else ng "memory_path_ok: .. が通った"; fi
+  if ! memory_path_ok "$REFLECT_MEMORY_ROOT/proj/memory/sub/foo.md"; then ok; else ng "memory_path_ok: サブディレクトリが通った"; fi
+  if ! memory_path_ok "/etc/passwd"; then ok; else ng "memory_path_ok: prefix 外が通った"; fi
+  if ! memory_path_ok "$REFLECT_MEMORY_ROOT/proj/memory/foo.txt"; then ok; else ng "memory_path_ok: .md 以外が通った"; fi
+  if ! memory_path_ok "$REFLECT_MEMORY_ROOT/./memory/foo.md"; then ok; else ng "memory_path_ok: . セグメントが通った"; fi
+
+  # --- process_memory_block ---
+  local sid="t1" f1="$REFLECT_MEMORY_ROOT/p1/memory/new1.md" blk out
+
+  blk="$tmpdir/blk-create.txt"
+  make_block "$blk" create "$f1" "- [New1](new1.md) — hook" "hello world"
+  if out=$(process_memory_block "$blk" "$sid" 1) && [ -f "$f1" ] \
+    && grep -qF "hello world" "$f1" \
+    && grep -qF "](new1.md)" "$(dirname "$f1")/MEMORY.md"; then
+    ok
+  else
+    ng "process_memory_block: create 成功ケース ($out)"
+  fi
+
+  blk="$tmpdir/blk-create-conflict.txt"
+  make_block "$blk" create "$f1" "- [New1](new1.md) — hook" "hello again"
+  if ! process_memory_block "$blk" "$sid" 2 >/dev/null && [ -f "$HOLD/$sid-memory-2.txt" ]; then
+    ok
+  else
+    ng "process_memory_block: create 衝突が hold に落ちない"
+  fi
+
+  blk="$tmpdir/blk-update.txt"
+  make_block "$blk" update "$f1" "- [New1](new1.md) — hook" "updated body"
+  if process_memory_block "$blk" "$sid" 3 >/dev/null \
+    && grep -qF "updated body" "$f1" && ! grep -qF "hello world" "$f1" \
+    && [ "$(grep -cF '](new1.md)' "$(dirname "$f1")/MEMORY.md")" -eq 1 ]; then
+    ok
+  else
+    ng "process_memory_block: update 成功ケース (置換または index 重複)"
+  fi
+
+  local f2="$REFLECT_MEMORY_ROOT/p1/memory/missing.md"
+  blk="$tmpdir/blk-update-missing.txt"
+  make_block "$blk" update "$f2" "" "body"
+  if ! process_memory_block "$blk" "$sid" 4 >/dev/null && [ -f "$HOLD/$sid-memory-4.txt" ]; then
+    ok
+  else
+    ng "process_memory_block: update 対象未存在が hold に落ちない"
+  fi
+
+  blk="$tmpdir/blk-badmode.txt"
+  make_block "$blk" delete "$f1" "" "body"
+  if ! process_memory_block "$blk" "$sid" 5 >/dev/null && [ -f "$HOLD/$sid-memory-5.txt" ]; then
+    ok
+  else
+    ng "process_memory_block: 不正 mode が hold に落ちない"
+  fi
+
+  local f3="$REFLECT_MEMORY_ROOT/p1/memory/dryrun.md"
+  blk="$tmpdir/blk-dryrun.txt"
+  make_block "$blk" create "$f3" "- [Dry](dryrun.md) — hook" "dry body"
+  if REFLECT_DRY_RUN=1 process_memory_block "$blk" "$sid" 6 >/dev/null && [ ! -e "$f3" ]; then
+    ok
+  else
+    ng "process_memory_block: DRY_RUN で書き込みが発生した"
+  fi
+
+  local f4="$REFLECT_MEMORY_ROOT/p1/memory/nobody.md"
+  blk="$tmpdir/blk-nobody.txt"
+  { echo "mode: create"; echo "file: $f4"; echo "index:"; } >"$blk" # "---" 区切りなし = 本文空
+  if ! process_memory_block "$blk" "$sid" 7 >/dev/null && [ -f "$HOLD/$sid-memory-7.txt" ] && [ ! -e "$f4" ]; then
+    ok
+  else
+    ng "process_memory_block: 本文空 (--- 欠落) が hold に落ちない"
+  fi
+
+  # --- extract_block: MEMORY 本文に引用された SUMMARY 開始マーカーの混在 ---
+  local mixed2="$tmpdir/mixed2.txt"
+  cat >"$mixed2" <<'EOF'
+<<<REFLECT-MEMORY
+mode: create
+file: /tmp/x/memory/c.md
+index: - [C](c.md) — hook
+---
+<<<REFLECT-SUMMARY
+fake summary quoted inside memory body
+REFLECT-MEMORY>>>
+<<<REFLECT-SUMMARY
+real summary line
+REFLECT-SUMMARY>>>
+EOF
+  if [ "$(extract_block SUMMARY <"$mixed2")" = "real summary line" ]; then
+    ok
+  else
+    ng "extract_block: MEMORY 本文中の引用 SUMMARY マーカーを本物と誤認した"
+  fi
+
+  # --- 空 MEMORY ブロックが痕跡なく消えない ---
+  local outdir2="$tmpdir/split2"
+  mkdir -p "$outdir2"
+  printf '<<<REFLECT-MEMORY\nREFLECT-MEMORY>>>\n' | split_memory_blocks "$outdir2"
+  if [ -f "$outdir2/mem-1" ]; then ok; else ng "split: 空ブロックの mem ファイルが作られない"; fi
+  if ! process_memory_block "$outdir2/mem-1" "$sid" 8 >/dev/null && [ -f "$HOLD/$sid-memory-8.txt" ]; then
+    ok
+  else
+    ng "process_memory_block: 空ブロックが hold に落ちない"
+  fi
+
+  local f5="$REFLECT_MEMORY_ROOT/p1/memory/noindex.md"
+  blk="$tmpdir/blk-noindex.txt"
+  make_block "$blk" create "$f5" "" "body"
+  if ! process_memory_block "$blk" "$sid" 9 >/dev/null && [ -f "$HOLD/$sid-memory-9.txt" ] && [ ! -e "$f5" ]; then
+    ok
+  else
+    ng "process_memory_block: create + 空 index が hold に落ちない"
+  fi
+
+  local f6="$REFLECT_MEMORY_ROOT/p1/memory/mismatch.md"
+  blk="$tmpdir/blk-mismatch.txt"
+  make_block "$blk" create "$f6" "- [Other](other.md) — hook" "body"
+  if ! process_memory_block "$blk" "$sid" 10 >/dev/null && [ -f "$HOLD/$sid-memory-10.txt" ] && [ ! -e "$f6" ]; then
+    ok
+  else
+    ng "process_memory_block: index basename 不一致が hold に落ちない"
+  fi
+
+  # 書き込み失敗 (親ディレクトリ読み取り専用で mktemp が落ちる) が hold に落ちる
+  local rodir="$REFLECT_MEMORY_ROOT/ro/memory" f7="$REFLECT_MEMORY_ROOT/ro/memory/blocked.md"
+  mkdir -p "$rodir"
+  chmod 555 "$rodir"
+  blk="$tmpdir/blk-rofail.txt"
+  make_block "$blk" create "$f7" "- [Blocked](blocked.md) — hook" "body"
+  if ! process_memory_block "$blk" "$sid" 11 >/dev/null && [ -f "$HOLD/$sid-memory-11.txt" ] && [ ! -e "$f7" ]; then
+    ok
+  else
+    ng "process_memory_block: 書き込み失敗が成功扱いになった"
+  fi
+  chmod 755 "$rodir" # trap の rm -rf が消せるように戻す
+
+  # update + 空 index で MEMORY.md が変化しない
+  local memmd1 lines_before lines_after
+  memmd1="$(dirname "$f1")/MEMORY.md"
+  lines_before=$(grep -c '' "$memmd1")
+  blk="$tmpdir/blk-update-noindex.txt"
+  make_block "$blk" update "$f1" "" "updated again"
+  if process_memory_block "$blk" "$sid" 12 >/dev/null \
+    && lines_after=$(grep -c '' "$memmd1") \
+    && grep -qF "updated again" "$f1" && [ "$lines_before" = "$lines_after" ]; then
+    ok
+  else
+    ng "process_memory_block: update + 空 index で MEMORY.md が変化した"
+  fi
+
+  echo "self-test: pass=$pass fail=$fail"
+  [ "$fail" -eq 0 ]
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+  self_test
+  exit $?
+fi
+
+exec >>"$LOG" 2>&1
 
 # 多重起動ガード (launchd の catch-up と手動実行の重なり防止)。
 # why PID 生存判定: 経過時間だけで stale と断ずると、claude のハング等で
@@ -70,18 +475,6 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 echo $$ >"$LOCK/pid"
 trap 'rm -rf "$LOCK" 2>/dev/null' EXIT
-
-extract_block() { # $1=タグ名 stdin=claude 出力。マーカー行の間だけを出す
-  # why 状態機械: ブロック本文に引用された別タグの開始マーカー (SKILL.md の
-  # 例示を含む transcript 等) を新規ブロック開始として拾うと、HOLD に隔離した
-  # 内容の一部を OUTBOX として投稿しうる。「最初に開いたブロックが閉じるまで、
-  # 他の開始マーカーは本文扱い」にして構造を一意にする
-  awk -v tag="$1" '
-    inblk == "" && /^<<<REFLECT-(OUTBOX|HOLD|SUMMARY)$/ { inblk = substr($0, 4); next }
-    inblk != "" && $0 == inblk ">>>" { inblk = ""; next }
-    inblk == "REFLECT-" tag { print }
-  '
-}
 
 post_issue() { # $1=outbox ファイル (1 行目 "title: ...", 2 行目以降が本文)。成功で issue URL を出力
   local f="$1" title body_file url rc
@@ -280,9 +673,24 @@ else
       fi
     fi
 
+    # memory ブロックは HOLD/OUTBOX の有無と独立に処理する (A の漏洩ガードと
+    # B のローカル書き込みは blast radius が別物)
+    mem_result=""
+    mem_dir=$(mktemp -d "${TMPDIR:-/tmp/}reflect-mem-XXXXXX")
+    split_memory_blocks "$mem_dir" <<<"$out"
+    for mf in "$mem_dir"/mem-*; do
+      [ -f "$mf" ] || continue
+      n="${mf##*/mem-}"
+      mem_line=$(process_memory_block "$mf" "$sid" "$n")
+      mem_result="${mem_result}${mem_line}
+"
+    done
+    rm -rf "$mem_dir"
+
     {
       printf '%s\n' "$summary"
       [ -n "$status_line" ] && printf '\n%s\n' "$status_line"
+      [ -n "$mem_result" ] && printf '\n%s' "$mem_result"
     } | inbox_append "$(date '+%Y-%m-%d') $sid ($cwd)"
     mark_done "$sid" "$cur_lines"
     log "$sid: 完了"

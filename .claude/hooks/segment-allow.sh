@@ -135,23 +135,94 @@ split_segments() {
   _emit
 }
 
+# セグメント（trim 済み）がクォート外に危険なシェルメタ文字を含むか判定する。
+# 0: 含む(危険) / 1: 含まない
+#
+# Why: 末尾 glob の prefix 照合はセグメント先頭のコマンド名しか守れない。
+#   split_segments が分割するのは &&/||/;/| だけなので、単一 & (バックグラウンド)・
+#   改行・$()・`` ` ``・サブシェル ()・入出力リダイレクト < > は 1 セグメント内に
+#   残り、`echo *` 等の safe prefix にマッチして素通りしてしまう。
+#   例: `gh api foo & rm -rf ~` は 1 セグメントで `gh api ` 始まり扱いになる。
+#   これらを含むセグメントは prefix が何であれ unsafe に倒す（構造の白名簿化）。
+# ' " ` のクォートは尊重するが、ダブルクォート内でも $ と ` は展開されるため危険とみなす。
+# gh api の /tmp リダイレクト例外は、呼び出し側が > を剥がしてからこの関数に渡す。
+has_unsafe_metachar() {
+  local s="$1"
+  local i=0 len=${#s} ch
+  local in_single=0 in_double=0 bs_run=0
+  while [ "$i" -lt "$len" ]; do
+    ch="${s:$i:1}"
+    if [ "$in_single" = 1 ]; then
+      [ "$ch" = "'" ] && in_single=0
+    elif [ "$in_double" = 1 ]; then
+      if [ "$ch" = '\' ]; then
+        bs_run=$((bs_run+1))
+      elif [ "$ch" = '"' ]; then
+        [ $((bs_run % 2)) -eq 0 ] && in_double=0
+        bs_run=0
+      elif [ "$ch" = '$' ] || [ "$ch" = '`' ]; then
+        return 0
+      else
+        bs_run=0
+      fi
+    else
+      case "$ch" in
+        "'") in_single=1 ;;
+        '"') in_double=1; bs_run=0 ;;
+        '$'|'`'|'&'|'('|')'|'<'|'>') return 0 ;;
+        *) [ "$ch" = $'\n' ] && return 0 ;;
+      esac
+    fi
+    i=$((i+1))
+  done
+  return 1
+}
+
 # 単一セグメント（trim 済み前提）が safe-prefix に該当するか判定する。
 # 0: safe / 1: not safe
 is_safe_segment() {
   local seg="$1"
   [ -z "$seg" ] && return 1
 
-  # gh api だけは「書き込みフラグの有無」を見るため特別扱い。
+  # gh api の出力を一時ファイルへ保存する `> /tmp/...` / `>> /tmp/...` は
+  # 実運用で多用するため例外的に許可する。リダイレクト先は /tmp/ 配下の
+  # リテラルパス（空白・変数展開・.. を含まない）に限定し、リダイレクト部を
+  # 剥がして残りを通常判定に回す。/tmp 以外・変数展開ありのリダイレクトは
+  # ここでマッチせず、後段の has_unsafe_metachar が > を検出して unsafe にする。
+  case "$seg" in
+    'gh api '*'>'*)
+      if [[ "$seg" =~ ^(gh\ api\ [^\>]*[^\>[:space:]])[[:space:]]*'>''>'?[[:space:]]*(/tmp/[^[:space:]]+)$ ]] \
+         && [[ "${BASH_REMATCH[2]}" != *..* ]]; then
+        seg="${BASH_REMATCH[1]}"
+      fi
+      ;;
+  esac
+
+  # クォート外の危険メタ文字（& $ ` ( ) < > 改行）を含むなら不許可。
+  if has_unsafe_metachar "$seg"; then
+    return 1
+  fi
+
+  # gh api は「書き込みフラグを 1 つも含まないと証明できるとき」だけ safe。
   # 静的 allow には Bash(gh api *) が無い前提で、hook が auto-allow の責務を負う。
-  #   -f / -F     : フィールド送信（POST 等）
-  #   --input     : ファイル/標準入力ボディ
-  #   -X / --method: HTTP メソッド明示指定
-  # 末尾アンカーに `=` を含めるのは `--method=POST` 形式も拾うため。
+  # ブロックリスト正規表現は long form (--field/--raw-field) や連結形 (-XDELETE,
+  # -Ftitle=x) を取りこぼすため、トークンに分割して write 系フラグの prefix を見る。
+  #   -X* / --method* : HTTP メソッド指定
+  #   -f* / --raw-field* : raw string パラメータ（GET を POST 化する）
+  #   -F* / --field*     : typed パラメータ（同上）
+  #   --input*           : リクエストボディ
   case "$seg" in
     'gh api '*)
-      if [[ "$seg" =~ (^|[[:space:]])(-(f|F)|--input|-X|--method)([[:space:]]|$|=) ]]; then
-        return 1
-      fi
+      local -a toks
+      read -ra toks <<< "$seg"
+      local t
+      for t in "${toks[@]}"; do
+        case "$t" in
+          -X*|--method*|-f*|-F*|--field*|--raw-field*|--input*)
+            return 1
+            ;;
+        esac
+      done
       return 0
       ;;
   esac
@@ -203,7 +274,9 @@ emit_passthrough() {
 
 main() {
   local cmd
-  cmd="$(jq -r '.tool_input.command')"
+  # 不正 JSON / command 欠落では判定せず静的ルールに委ねる（set -e で落とさない）。
+  cmd="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { emit_passthrough; return; }
+  [ -z "$cmd" ] && { emit_passthrough; return; }
   if evaluate_command "$cmd"; then
     emit_allow
   else
@@ -283,6 +356,11 @@ run_self_test() {
   assert_safe 'mkdir 引数あり (:* 由来)' 'mkdir -p /tmp/foo && gh api repos/foo/bar/pulls/1'
   assert_safe 'bun test (引数なし :* 由来)' 'bun test && gh api repos/foo/bar/pulls/1'
   assert_safe 'bun test 引数あり (:* 由来)' 'bun test --watch && gh api repos/foo/bar/pulls/1'
+  # gh api の出力を /tmp へ保存するリダイレクトは実運用で多用するため許可
+  assert_safe 'gh api > /tmp 保存' 'gh api repos/foo/bar/pulls/1 > /tmp/out.json'
+  assert_safe 'gh api >> /tmp 追記' 'gh api repos/foo/bar/pulls/1 >> /tmp/out.json'
+  assert_safe 'gh api --jq 付き > /tmp 保存' "gh api repos/foo/bar/pulls/1 --jq '.title' > /tmp/title.txt"
+  assert_safe 'gh api > /tmp サブディレクトリ' 'gh api repos/foo/bar/pulls/1 > /tmp/sub/dir/out.json'
 
   # unsafe ケース
   assert_unsafe 'rm -rf を含む' 'rm -rf /tmp/foo && gh api repos/foo/bar/pulls/1'
@@ -301,6 +379,23 @@ run_self_test() {
   assert_unsafe 'env FOO=bar cmd は引数付きで safe ではない' 'env FOO=bar curl x && gh api repos/foo/bar/pulls/1'
   assert_unsafe 'git stash (subcommand mismatch)' 'gh api repos/foo/bar/pulls/1 && git stash'
   assert_unsafe 'gh pr create (write subcommand)' 'gh api repos/foo/bar/pulls/1 && gh pr create -t x'
+  # クォート外メタ文字による分割すり抜け（構造の白名簿化で塞いだ穴）
+  assert_unsafe '単一 & でバックグラウンド実行' 'gh api repos/foo/bar/pulls/1 & rm -rf /tmp/x'
+  assert_unsafe 'コマンド置換 $()' 'gh api repos/foo/bar/pulls/1 && echo $(reboot)'
+  assert_unsafe 'バッククォート置換' 'gh api repos/foo/bar/pulls/1 && echo `reboot`'
+  assert_unsafe 'サブシェル ()' 'gh api repos/foo/bar/pulls/1 && (rm -rf /tmp/x)'
+  assert_unsafe '入力リダイレクト <' 'gh api repos/foo/bar/pulls/1 < /etc/passwd'
+  assert_unsafe 'echo でリダイレクト上書き' 'echo pwned > /home/user/.zshrc && gh api repos/foo/bar/pulls/1'
+  assert_unsafe 'gh api の任意先リダイレクト' 'gh api repos/foo/bar/pulls/1 > /home/user/.zshrc'
+  assert_unsafe 'gh api リダイレクト先が /tmp 外' 'gh api repos/foo/bar/pulls/1 > /etc/hosts'
+  assert_unsafe 'gh api リダイレクト先に .. traversal' 'gh api repos/foo/bar/pulls/1 > /tmp/../etc/x'
+  assert_unsafe 'ダブルクォート内 $ 展開' 'gh api repos/foo/bar/pulls/1 && echo "$HOME"'
+  # gh api 書き込みフラグの long form / 連結形（トークン判定で塞いだ穴）
+  assert_unsafe 'gh api --field (long form write)' 'gh api repos/foo/bar/issues --field title=spam'
+  assert_unsafe 'gh api --raw-field (long form write)' 'gh api repos/foo/bar/issues --raw-field body=x'
+  assert_unsafe 'gh api -XDELETE (連結形)' 'gh api repos/foo/bar/pulls/1 -XDELETE'
+  assert_unsafe 'gh api -Ftitle=x (連結形)' 'gh api repos/foo/bar/issues -Ftitle=hello'
+  assert_unsafe 'gh api -ftitle=x (連結形)' 'gh api repos/foo/bar/issues -ftitle=hello'
 
   # split_segments 単体: クォート尊重と空セグメント抑制
   assert_split_count() {

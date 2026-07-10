@@ -32,12 +32,14 @@ description: >
 
 **type 使い分けの why**: 1〜3 は Skill を呼ぶため Skill ツールが使える general-purpose が必須。4 は named agent（tools 制限・model 固定済み）で Skill 呼び出し不要。
 
+**1〜3 は `model: sonnet` を明示して起動する**（Fable セッションでメインモデルを継承しトークンを浪費しないため。4 は model 固定済みで不要）。
+
 各エージェントへの追加指示:
 
 - **1. 実装品質**: プロンプトに以下を含める。
   - 既存コードとの一貫性を最優先（指摘には根拠ファイル:行を併記）
   - 非機能要件は「不足」だけでなく「過剰」（不要なメモ化・過度な抽象化）も検出
-  - 重要度は `.claude/skills/shared/review-severity.md` の定義に従う。**本文をプロンプトに直接含める**（独立コンテキストの subagent には参照パスが届かないため）
+  - 重要度は `~/.claude/skills/shared/review-severity.md` の定義に従う。**本文をプロンプトに直接含める**（独立コンテキストの subagent には参照パスが届かないため）
 - **2. テスト設計**: `/test-design-guide` に従う（観点はそちらに集約）
 - **3. コメント精査**: `/comment-scrutiny` に従う。差分内のコメントを「消すと壊れる」かで分類
 - **4. バグ・規約レビュー**: `feature-dev:code-reviewer`（named agent・tools 制限済み・Bash なし）に差分全文をプロンプトで渡す。agent は CLAUDE.md 準拠・バグ・セキュリティを自身の基準で絞って報告する。出力は Critical / Important の 2 段で日本語（フェーズ 3 の読み替えが前提とする形式）

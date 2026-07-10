@@ -87,7 +87,8 @@ zstyle ':fzf-tab:complete:(kill|ps):argument-rest' fzf-preview \
 zstyle ':fzf-tab:complete:(kill|ps):argument-rest' fzf-flags --preview-window=down:3:wrap
 zstyle ':fzf-tab:complete:(-command-|-parameter-|-brace-parameter-|export|unset|expand):*' \
   fzf-preview 'echo ${(P)word}'
-source ~/projects/fzf-tab/fzf-tab.plugin.zsh
+# why: 未クローンのマシンで毎回 source エラーを出さないよう存在ガードする（clone は setup.sh が担う）
+[ -f ~/projects/fzf-tab/fzf-tab.plugin.zsh ] && source ~/projects/fzf-tab/fzf-tab.plugin.zsh
 
 # 環境別の追加設定を読み込む
 [[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"

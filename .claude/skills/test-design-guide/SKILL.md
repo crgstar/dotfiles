@@ -63,4 +63,4 @@ description: >
 - 欠陥が本質的なら別課題として切り出し、スタイル刷新とは混ぜない
 
 ## 重要度
-- レビュー時の重要度判定は `.claude/skills/shared/review-severity.md` の定義に従う
+- レビュー時の重要度判定は `~/.claude/skills/shared/review-severity.md` の定義に従う

@@ -4,7 +4,37 @@ set -euo pipefail
 DOTFILES_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOST_ENV="${1:-}"
 
+# why: typo (例: `setup.sh hoem`) を「base のみリンクで成功」と誤認させないため、
+#      未知の環境名は即エラーにする。有効 env は settings.local/<env>.json から導出する
+#      (common は層であって env ではないので除外)。env 未指定 (空) は base のみで従来通り許容。
+if [ -n "$HOST_ENV" ]; then
+  _valid_envs=""
+  for _f in "$DOTFILES_DIR"/.claude/settings.local/*.json; do
+    [ -e "$_f" ] || continue
+    _name="$(basename "$_f" .json)"
+    [ "$_name" = "common" ] && continue
+    _valid_envs="$_valid_envs $_name"
+  done
+  case " $_valid_envs " in
+    *" $HOST_ENV "*) ;;
+    *) echo "エラー: 未知の環境名 '$HOST_ENV'。有効:$_valid_envs" >&2; exit 1 ;;
+  esac
+fi
+
 MERGE_TOOL="${MERGE_TOOL:-code --wait --diff}"
+
+# why: 非対話実行 (CI / Claude / パイプ経由) では read が EOF を返し、set -e で
+#      setup 全体が途中 abort して環境が半構成で残る。非 TTY では対話せず、既存を
+#      壊さない安全側の既定値を採用し、drift の存在だけ警告する。
+ask() {
+  # $1: プロンプト文字列 / $2: 非対話時の既定値 / $3: 代入先の変数名
+  if [ -t 0 ]; then
+    read -rp "$1" "$3"
+  else
+    printf '%s[非対話のため %s を自動選択]\n' "$1" "$2"
+    printf -v "$3" '%s' "$2"
+  fi
+}
 
 # マージ生成ファイルの上書き前に既存内容との差分を確認する
 # 差分がなければそのまま上書き、差分があればユーザに選択を求める
@@ -36,7 +66,7 @@ safe_overwrite() {
   echo "  m) マージする ($MERGE_TOOL で編集)"
   echo "  s) スキップ"
   echo ""
-  read -rp "  選択 [n/k/m/s]: " choice
+  ask "  選択 [n/k/m/s]: " k choice
 
   case "$choice" in
     n)
@@ -60,7 +90,7 @@ safe_overwrite() {
       echo "  -----------------------------------------"
       cat "$dest"
       echo "  -----------------------------------------"
-      read -rp "  この内容でよいですか？ [y/n]: " confirm
+      ask "  この内容でよいですか？ [y/n]: " n confirm
 
       if [ "$confirm" = "y" ]; then
         rm -f "$new_content_file"
@@ -121,7 +151,7 @@ link_file() {
       echo "  m) マージする ($MERGE_TOOL で編集)"
       echo "  s) スキップ"
       echo ""
-      read -rp "  選択 [d/e/m/s]: " choice
+      ask "  選択 [d/e/m/s]: " s choice
 
       case "$choice" in
         d)
@@ -147,7 +177,7 @@ link_file() {
           echo "  -----------------------------------------"
           cat "$src"
           echo "  -----------------------------------------"
-          read -rp "  この内容でリンクしますか？ [y/n]: " confirm
+          ask "  この内容でリンクしますか？ [y/n]: " n confirm
 
           if [ "$confirm" = "y" ]; then
             rm "$dest"
@@ -399,13 +429,27 @@ else
   echo "      git clone \"\$AUQ_WEB_REPO\" ~/projects/auq-web  # set AUQ_WEB_REPO to your fork"
 fi
 
+# why: .zshrc が ~/projects/fzf-tab を source するので、未クローンなら shallow clone する
+#      （新規マシンで SSH 鍵が無くても済むよう HTTPS 経由）。
+FZF_TAB_DIR="$HOME/projects/fzf-tab"
+if [ ! -d "$FZF_TAB_DIR/.git" ]; then
+  mkdir -p "$(dirname "$FZF_TAB_DIR")"
+  git clone --depth 1 https://github.com/Aloxaf/fzf-tab.git "$FZF_TAB_DIR" \
+    || echo "警告: fzf-tab の clone に失敗しました（fzf-tab 補完は無効のまま続行）"
+fi
+
 # why: mattpocock/skills は第三者リポなので dotfiles に取り込まず、
 #      XDG_DATA_HOME 配下に shallow clone してから symlink で配る。
 #      npx skills@latest installer を経由しないので claude-code 専用に閉じる。
 MP_SKILLS_DIR="$HOME/.local/share/mattpocock-skills"
 if [ -d "$MP_SKILLS_DIR/.git" ]; then
-  git -C "$MP_SKILLS_DIR" pull --ff-only --quiet
-  echo "updated: $MP_SKILLS_DIR"
+  # why: オフラインや upstream force-push で pull が失敗しても setup 全体を
+  #      止めない（後続の hook 配線・prefix 生成まで到達させるため）。
+  if git -C "$MP_SKILLS_DIR" pull --ff-only --quiet; then
+    echo "updated: $MP_SKILLS_DIR"
+  else
+    echo "警告: $MP_SKILLS_DIR の更新に失敗しました（既存の clone のまま続行）"
+  fi
 else
   mkdir -p "$(dirname "$MP_SKILLS_DIR")"
   git clone --depth 1 https://github.com/mattpocock/skills.git "$MP_SKILLS_DIR"
@@ -418,15 +462,21 @@ link_file "$MP_SKILLS_DIR/skills/engineering/grill-with-docs" \
           "$HOME/.claude/skills/grill-with-docs"
 
 # work 環境専用スキル (PR 作成ワークフローは work リポジトリの規約前提)
+# beat-copilot は create-pr の SKILL.md を Edit で更新する強依存があるため、
+# create-pr と同じ work gate に置く (home では create-pr が無く参照先を失う)。
 if [ "$HOST_ENV" = "work" ]; then
   link_file "$DOTFILES_DIR/.claude/skills/create-pr/SKILL.md" \
             "$HOME/.claude/skills/create-pr/SKILL.md"
+  link_file "$DOTFILES_DIR/.claude/skills/beat-copilot/SKILL.md" \
+            "$HOME/.claude/skills/beat-copilot/SKILL.md"
 fi
 
 link_file "$DOTFILES_DIR/.claude/hooks/segment-allow.sh" \
           "$HOME/.claude/hooks/segment-allow.sh"
 link_file "$DOTFILES_DIR/.claude/hooks/mcp-error-toolsearch.sh" \
           "$HOME/.claude/hooks/mcp-error-toolsearch.sh"
+link_file "$DOTFILES_DIR/.claude/hooks/escalate-unsafe-bash.sh" \
+          "$HOME/.claude/hooks/escalate-unsafe-bash.sh"
 
 # ----- reflect 無人実行 (SessionEnd enqueue + launchd 夜間ドライバ) -----
 

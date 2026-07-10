@@ -5,6 +5,7 @@ __pycache__/
 .claude/CLAUDE.merged.md
 .claude/settings.local.json
 ghostty/config.merged
-docs.local/
+*.tmp
+.local/
 .worktrees/
 .claude/worktrees/

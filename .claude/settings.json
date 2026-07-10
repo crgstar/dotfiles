@@ -144,7 +144,6 @@
       "Glob(*/mirugit/*)",
       "Glob(*/.claude/*)",
       "Grep(*/.claude/*)",
-      "Bash(copilot *レビュー*)",
       "Bash(copilot --version*)",
       "Bash(copilot --help*)",
       "Bash(copilot help*)",
@@ -231,6 +230,15 @@
           {
             "type": "command",
             "command": "npx -y ccstatusline@latest --hook"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/escalate-unsafe-bash.sh"
           }
         ]
       }

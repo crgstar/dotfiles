@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Claude Code の会話履歴（.jsonl）を人間が読める形式で出力する。"""
 
+import argparse
 import json
 import re
 import sys
@@ -15,7 +16,13 @@ def extract_blocks(path: str, show_thinking: bool) -> list[dict]:
     blocks = []
     with open(path, encoding="utf-8") as f:
         for line in f:
-            obj = json.loads(line)
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                # ライブ追記中のjsonlは書き込み途中で切れた行が混ざるためスキップする
+                continue
             t = obj.get("type")
             content = obj.get("message", {}).get("content", [])
 
@@ -71,25 +78,57 @@ def print_block(block: dict, start_lineno: int, with_separator: bool = True, sho
             print(line)
 
 
-def main() -> None:
-    args = sys.argv[1:]
-    show_thinking = "--no-thinking" not in args
-    show_number = "-n" in args
-    show_separator = "--separator" in args
-    grep_user = next((a[len("--grep-user="):] for a in args if a.startswith("--grep-user=")), None)
-    grep_assistant = next((a[len("--grep-assistant="):] for a in args if a.startswith("--grep-assistant=")), None)
-    after = next((int(a[len("-A"):]) for a in args if re.fullmatch(r"-A\d+", a)), 0)
-    before = next((int(a[len("-B"):]) for a in args if re.fullmatch(r"-B\d+", a)), 0)
-    files = [a for a in args if not a.startswith("-")]
+USAGE = "usage: claude-history [-n] [--separator] [--no-thinking] [--grep-user=PAT] [--grep-assistant=PAT] [-AN] [-BN] <file.jsonl>"
 
-    if not files:
-        print(
-            "usage: claude-history [-n] [--separator] [--no-thinking] [--grep-user=PAT] [--grep-assistant=PAT] [-AN] [-BN] <file.jsonl>",
-            file=sys.stderr,
-        )
+
+class _KeepFirst(argparse.Action):
+    """複数回指定された場合は最初の指定を採用する（旧実装の next() が先頭一致を優先していたのに合わせる）。"""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        seen_attr = f"_{self.dest}_seen"
+        if not getattr(namespace, seen_attr, False):
+            setattr(namespace, self.dest, values)
+            setattr(namespace, seen_attr, True)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    # allow_abbrev=False: 旧実装は完全一致のフラグしか認識しなかったため、
+    # 部分一致(略記)を許すと未知フラグの黙殺という旧バグを別形で温存してしまう
+    parser = argparse.ArgumentParser(prog="claude-history", allow_abbrev=False)
+    parser.add_argument("file", nargs="?", default=None)
+    parser.add_argument("-n", dest="show_number", action="store_true")
+    parser.add_argument("--separator", dest="show_separator", action="store_true")
+    parser.add_argument("--no-thinking", dest="no_thinking", action="store_true")
+    parser.add_argument("--grep-user", dest="grep_user", default=None, action=_KeepFirst)
+    parser.add_argument("--grep-assistant", dest="grep_assistant", default=None, action=_KeepFirst)
+    parser.add_argument("-A", dest="after", type=int, default=0, action=_KeepFirst)
+    parser.add_argument("-B", dest="before", type=int, default=0, action=_KeepFirst)
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.file is None:
+        print(USAGE, file=sys.stderr)
         sys.exit(1)
 
-    blocks = extract_blocks(files[0], show_thinking)
+    # 空パターンは全ブロック非マッチとなり出力が無言で空になるため、誤入力として明示的に弾く
+    if args.grep_user == "":
+        parser.error("--grep-user のパターンが空です")
+    if args.grep_assistant == "":
+        parser.error("--grep-assistant のパターンが空です")
+
+    show_thinking = not args.no_thinking
+    show_number = args.show_number
+    show_separator = args.show_separator
+    grep_user = args.grep_user
+    grep_assistant = args.grep_assistant
+    after = args.after
+    before = args.before
+
+    blocks = extract_blocks(args.file, show_thinking)
 
     # 各ブロックの開始行番号を事前計算（grep前の全出力ベース）
     linenos = []

@@ -1,4 +1,5 @@
 {
+  "cleanupPeriodDays": 365,
   "permissions": {
     "allow": [
       "Read(*)",
@@ -224,7 +225,6 @@
     ],
     "PreToolUse": [
       {
-        "_tag": "ccstatusline-managed",
         "matcher": "Skill",
         "hooks": [
           {
@@ -255,7 +255,6 @@
     ],
     "UserPromptSubmit": [
       {
-        "_tag": "ccstatusline-managed",
         "hooks": [
           {
             "type": "command",
@@ -273,7 +272,7 @@
   "enabledPlugins": {
     "context7@claude-plugins-official": true,
     "example-skills@anthropic-agent-skills": false,
-    "superpowers@superpowers-marketplace": true,
+    "superpowers@superpowers-marketplace": false,
     "dig@kuu-marketplace": true,
     "code-simplifier@claude-plugins-official": false,
     "code-review@claude-plugins-official": true,
@@ -289,11 +288,10 @@
     "enabled": true,
     "mode": "hold"
   },
-  "theme": "dark-ansi",
-  "skipAutoPermissionPrompt": true,
-  "voiceEnabled": true,
   "autoMemoryEnabled": true,
   "skipWorkflowUsageWarning": true,
+  "theme": "dark-ansi",
   "verbose": false,
-  "cleanupPeriodDays": 365
+  "skipAutoPermissionPrompt": true,
+  "voiceEnabled": true
 }

@@ -141,8 +141,6 @@
       "Bash(curl * http://127.0.0.1:19556/*)",
       "Read(*/.mirugit/*)",
       "Edit(*/.mirugit/*)",
-      "Glob(*/mirugit/*)",
-      "Glob(*/.claude/*)",
       "Grep(*/.claude/*)",
       "Bash(copilot --version*)",
       "Bash(copilot --help*)",

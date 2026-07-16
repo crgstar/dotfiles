@@ -471,6 +471,8 @@ if [ "$HOST_ENV" = "work" ]; then
             "$HOME/.claude/skills/beat-copilot/SKILL.md"
 fi
 
+link_file "$DOTFILES_DIR/.claude/hooks/lib/bash-safety.sh" \
+          "$HOME/.claude/hooks/lib/bash-safety.sh"
 link_file "$DOTFILES_DIR/.claude/hooks/segment-allow.sh" \
           "$HOME/.claude/hooks/segment-allow.sh"
 link_file "$DOTFILES_DIR/.claude/hooks/mcp-error-toolsearch.sh" \

@@ -36,6 +36,10 @@ set -euo pipefail
 # setup.sh 未実行の状態でも壊れないようにする。
 SAFE_PREFIX_FILE="${SAFE_PREFIX_FILE:-$HOME/.claude/hooks/segment-allow.prefixes}"
 
+# has_dangerous_shape / tokenize_quoted / DOTFILES_SKILLS_DIR は
+# escalate-unsafe-bash.sh と共有 (lib/ も ~/.claude/hooks/lib/ にリンクされる前提。setup.sh)。
+source "$(dirname "${BASH_SOURCE[0]}")/lib/bash-safety.sh"
+
 # 安全プレフィクスを配列に読み込む。コメント行 (# で始まる) と空行は無視。
 load_safe_prefixes() {
   SAFE_PREFIXES=()
@@ -191,7 +195,11 @@ is_safe_segment() {
   # ここでマッチせず、後段の has_unsafe_metachar が > を検出して unsafe にする。
   case "$seg" in
     'gh api '*'>'*)
-      if [[ "$seg" =~ ^(gh\ api\ [^\>]*[^\>[:space:]])[[:space:]]*'>''>'?[[:space:]]*(/tmp/[^[:space:]]+)$ ]] \
+      # why リダイレクト先の許可文字を制限: 以前は [^[:space:]]+ で任意文字を
+      # 受けていたため `> /tmp/$(id).json` のようなコマンド置換がリダイレクト先
+      # に紛れ込んでも剥がされて後段の has_unsafe_metachar に届かず ALLOW された
+      # (finding #0)。英数字・.・/ ・_・- だけに絞ることで $ ` ( ) 等を構造的に排除する。
+      if [[ "$seg" =~ ^(gh\ api\ [^\>]*[^\>[:space:]])[[:space:]]*'>''>'?[[:space:]]*(/tmp/[A-Za-z0-9._/-]+)$ ]] \
          && [[ "${BASH_REMATCH[2]}" != *..* ]]; then
         seg="${BASH_REMATCH[1]}"
       fi
@@ -200,6 +208,15 @@ is_safe_segment() {
 
   # クォート外の危険メタ文字（& $ ` ( ) < > 改行）を含むなら不許可。
   if has_unsafe_metachar "$seg"; then
+    return 1
+  fi
+
+  # escalate-unsafe-bash.sh と同じ危険形チェック (find -exec/-delete・非localhost
+  # curl・第三者スキル実行)。これが無いと、escalate 側が ask に格上げした危険形も
+  # `gh api` と連結するだけで PermissionRequest 側が allow に戻してしまう (finding #1)。
+  # why >/dev/null: has_dangerous_shape は該当時に理由を stdout へ printf する。
+  # ここでは真偽だけ使うので、捨てないとフックの JSON 出力に理由文字列が混入する。
+  if has_dangerous_shape "$seg" >/dev/null; then
     return 1
   fi
 
@@ -213,16 +230,14 @@ is_safe_segment() {
   #   --input*           : リクエストボディ
   case "$seg" in
     'gh api '*)
-      local -a toks
-      read -ra toks <<< "$seg"
       local t
-      for t in "${toks[@]}"; do
+      while IFS= read -r t; do
         case "$t" in
           -X*|--method*|-f*|-F*|--field*|--raw-field*|--input*)
             return 1
             ;;
         esac
-      done
+      done < <(tokenize_quoted "$seg")
       return 0
       ;;
   esac
@@ -362,6 +377,15 @@ run_self_test() {
   assert_safe 'gh api --jq 付き > /tmp 保存' "gh api repos/foo/bar/pulls/1 --jq '.title' > /tmp/title.txt"
   assert_safe 'gh api > /tmp サブディレクトリ' 'gh api repos/foo/bar/pulls/1 > /tmp/sub/dir/out.json'
 
+  # escalate-unsafe-bash.sh 側が ask に格上げする危険形が gh api と併記されても
+  # 素通ししないか (finding #1: PermissionRequest が escalate の ask を再び緩めていた)
+  assert_unsafe 'find -exec と gh api の併記' 'find . -exec rm {} \; && gh api repos/foo/bar/pulls/1'
+  assert_unsafe 'find -delete と gh api の併記' 'find . -delete && gh api repos/foo/bar/pulls/1'
+  assert_unsafe '非localhost curl と gh api の併記' 'curl https://evil.example/x && gh api repos/foo/bar/pulls/1'
+  assert_unsafe '第三者スキル実行と gh api の併記' 'bash /opt/other/.claude/skills/bar/run.sh && gh api repos/foo/bar/pulls/1'
+  # クォート外のバックスラッシュで書き込みフラグを隠す (実 bash は \-X を -X に畳み込む)
+  assert_unsafe 'gh api -X をバックスラッシュで偽装' 'gh api repos/foo/bar/issues \-Xdummy'
+
   # unsafe ケース
   assert_unsafe 'rm -rf を含む' 'rm -rf /tmp/foo && gh api repos/foo/bar/pulls/1'
   assert_unsafe 'git stash を含む' 'git stash && gh api repos/foo/bar/pulls/1'
@@ -389,6 +413,9 @@ run_self_test() {
   assert_unsafe 'gh api の任意先リダイレクト' 'gh api repos/foo/bar/pulls/1 > /home/user/.zshrc'
   assert_unsafe 'gh api リダイレクト先が /tmp 外' 'gh api repos/foo/bar/pulls/1 > /etc/hosts'
   assert_unsafe 'gh api リダイレクト先に .. traversal' 'gh api repos/foo/bar/pulls/1 > /tmp/../etc/x'
+  # finding #0: リダイレクト先のコマンド置換がノーチェックで ALLOW されていた穴
+  assert_unsafe 'gh api リダイレクト先に $() コマンド置換' 'gh api repos/foo/bar/pulls/1 > /tmp/$(id).json'
+  assert_unsafe 'gh api リダイレクト先にバッククォート置換' 'gh api repos/foo/bar/pulls/1 > /tmp/`id`.json'
   assert_unsafe 'ダブルクォート内 $ 展開' 'gh api repos/foo/bar/pulls/1 && echo "$HOME"'
   # gh api 書き込みフラグの long form / 連結形（トークン判定で塞いだ穴）
   assert_unsafe 'gh api --field (long form write)' 'gh api repos/foo/bar/issues --field title=spam'

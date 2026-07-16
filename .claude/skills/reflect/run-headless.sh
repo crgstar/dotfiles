@@ -122,8 +122,27 @@ split_proposal_blocks() { # $1=outdir stdin=claude 出力。REFLECT-PROPOSAL を
   split_blocks PROPOSAL prop "$1"
 }
 
-memory_path_ok() { # $1=path。許可条件をすべて満たすときだけ 0 (純粋関数)
-  local path="$1" root rest seg1 rest2 fname
+project_segment_for_cwd() { # $1=cwd(絶対パス)。~/.claude/projects/ 配下のプロジェクト
+  # ディレクトリ名は cwd の "/" と "." をどちらも "-" に置き換えたもの
+  # (実際の ~/.claude/projects/ 配下のディレクトリ名で確認済み。"/" だけ置換すると
+  # cwd に "." を含むプロジェクト (~/.claude/projects/ 配下自体を cwd にするケース等)
+  # で誤って不一致判定になり、正当な書き込みまで hold に落ちてしまう)。
+  # why 限定的な検証: Claude Code の公式ドキュメントにこのエンコード規則の記載は
+  # 見つからず、手元の実ディレクトリ名からの逆算で確認した範囲 ("/" "." のみ) に
+  # 留まる。スペースや非ASCII文字を含む cwd での実際のエンコードは未検証。
+  # 一致しない場合は memory_path_ok が cross-project 不一致として fail-safe に
+  # hold へ落とす (書き込み自体は防げるが、正当な書き込みが誤って止まりうる)。
+  # memory_path_ok の cross-project チェックで「この transcript が書いていい
+  # プロジェクト名」を求めるために使う(純粋関数)
+  printf '%s' "$1" | tr './' '--'
+}
+
+memory_path_ok() { # $1=path $2=expected_seg(省略可)。許可条件をすべて満たすときだけ 0 (純粋関数)
+  # why $2: file の 1 セグメント目 (プロジェクトディレクトリ名) が、この
+  # transcript 自身の cwd から導けるプロジェクト名と一致するかを見る。無いと
+  # transcript A の処理中に (ハルシネーションや prompt injection で) 別プロジェクト
+  # B の MEMORY.md を書き換えられてしまう。空なら従来通りチェックしない
+  local path="$1" expected_seg="${2:-}" root rest seg1 rest2 fname
   root="${REFLECT_MEMORY_ROOT:-$HOME/.claude/projects}"
 
   case "$path" in
@@ -144,6 +163,9 @@ memory_path_ok() { # $1=path。許可条件をすべて満たすときだけ 0 (
   seg1="${rest%%/*}"
   [ -n "$seg1" ] || return 1
   [ "$seg1" != "$rest" ] || return 1 # memory/ 以下が存在しない (1 セグメントで終わっている)
+  if [ -n "$expected_seg" ] && [ "$seg1" != "$expected_seg" ]; then
+    return 1 # この transcript の cwd から導けるプロジェクトと不一致
+  fi
 
   rest2="${rest#*/}"               # memory/<file>.md
   case "$rest2" in
@@ -159,9 +181,11 @@ memory_path_ok() { # $1=path。許可条件をすべて満たすときだけ 0 (
   return 0
 }
 
-process_memory_block() { # $1=blockfile $2=sid $3=n。結果行を stdout に 1 行 (成否は戻り値)
-  local blockfile="$1" sid="$2" n="$3"
+process_memory_block() { # $1=blockfile $2=sid $3=n $4=cwd(省略可)。結果行を stdout に 1 行 (成否は戻り値)
+  local blockfile="$1" sid="$2" n="$3" cwd="${4:-}"
   local mode="" file="" index="" fname="" header_done=0 line body_file fail=""
+  local expected_seg=""
+  [ -n "$cwd" ] && expected_seg="$(project_segment_for_cwd "$cwd")"
   body_file=$(mktemp "${TMPDIR:-/tmp/}reflect-mem-body-XXXXXX")
 
   # why ヘッダ読取: mode/file/index は先頭の "---" 行までのメタデータ。
@@ -191,7 +215,7 @@ process_memory_block() { # $1=blockfile $2=sid $3=n。結果行を stdout に 1 
   if [ -z "$fail" ] && [ ! -s "$body_file" ]; then
     fail="本文が空 (--- 区切り欠落の疑い)"
   fi
-  [ -n "$fail" ] || memory_path_ok "$file" || fail="許可パス外の file: $file"
+  [ -n "$fail" ] || memory_path_ok "$file" "$expected_seg" || fail="許可パス外 or プロジェクト不一致の file: $file"
   # create は index 必須 (MEMORY.md 未掲載のオーファン memory はどこからも辿れない)
   if [ -z "$fail" ] && [ "$mode" = "create" ] && [ -z "$index" ]; then
     fail="create だが index が空"
@@ -849,6 +873,19 @@ EOF
   if ! memory_path_ok "/etc/passwd"; then ok; else ng "memory_path_ok: prefix 外が通った"; fi
   if ! memory_path_ok "$REFLECT_MEMORY_ROOT/proj/memory/foo.txt"; then ok; else ng "memory_path_ok: .md 以外が通った"; fi
   if ! memory_path_ok "$REFLECT_MEMORY_ROOT/./memory/foo.md"; then ok; else ng "memory_path_ok: . セグメントが通った"; fi
+  # expected_seg 指定時: 自分のプロジェクトなら通り、他プロジェクトは弾く
+  if memory_path_ok "$REFLECT_MEMORY_ROOT/proj/memory/foo.md" "proj"; then ok; else ng "memory_path_ok: expected_seg 一致が NG"; fi
+  if ! memory_path_ok "$REFLECT_MEMORY_ROOT/other-proj/memory/foo.md" "proj"; then ok; else ng "memory_path_ok: expected_seg 不一致が通った (cross-project 書き込み)"; fi
+  if [ "$(project_segment_for_cwd "/Users/testuser/dotfiles")" = "-Users-testuser-dotfiles" ]; then
+    ok
+  else
+    ng "project_segment_for_cwd: / を - に置換していない"
+  fi
+  if [ "$(project_segment_for_cwd "/Users/testuser/.claude/projects/foo")" = "-Users-testuser--claude-projects-foo" ]; then
+    ok
+  else
+    ng "project_segment_for_cwd: . を - に置換していない (cwd に . を含む場合の実プロジェクト名と不一致)"
+  fi
 
   # --- process_memory_block ---
   local sid="t1" f1="$REFLECT_MEMORY_ROOT/p1/memory/new1.md" blk out
@@ -991,6 +1028,26 @@ EOF
     ok
   else
     ng "process_memory_block: update + 空 index で MEMORY.md が変化した"
+  fi
+
+  # cwd が別プロジェクトを指すと、file: が p1/memory/... でも hold に落ちる
+  # (finding #2: cross-project memory 汚染ガード)
+  blk="$tmpdir/blk-cross-project.txt"
+  make_block "$blk" update "$f1" "- [New1](new1.md) — hook" "from another project"
+  if ! process_memory_block "$blk" "$sid" 13 "/Users/other/otherproject" >/dev/null \
+    && [ -f "$HOLD/$sid-memory-13.txt" ] && ! grep -qF "from another project" "$f1"; then
+    ok
+  else
+    ng "process_memory_block: cwd 不一致の cross-project 書き込みが hold に落ちない"
+  fi
+
+  # cwd が同じプロジェクトを指す (project_segment_for_cwd("$cwd") = p1) なら通る
+  blk="$tmpdir/blk-same-project.txt"
+  make_block "$blk" update "$f1" "- [New1](new1.md) — hook" "from same project"
+  if process_memory_block "$blk" "$sid" 14 "p1" >/dev/null && grep -qF "from same project" "$f1"; then
+    ok
+  else
+    ng "process_memory_block: cwd 一致の同一プロジェクト書き込みが失敗した"
   fi
 
   # --- split_proposal_blocks ---
@@ -1543,6 +1600,11 @@ else
     fi
     path=$(jq -r '.path // empty' <<<"$entry")
     cwd=$(jq -r '.cwd // empty' <<<"$entry")
+    # why 可視化: cwd が空だと memory_path_ok の cross-project チェック
+    # (expected_seg) が無条件で skip される。無効化されていること自体は
+    # 従来の(cwd無し)動作への fallback で意図通りだが、気づけないと
+    # 「有効なつもりで実は無効」という状態が運用上見えなくなる
+    [ -n "$cwd" ] || log "$sid: queue entry に cwd が無く、memory の cross-project チェックを無効化"
 
     if [ ! -f "$path" ]; then
       log "$sid: transcript 消失 ($path)。done 扱い"
@@ -1644,7 +1706,7 @@ else
     for mf in "$mem_dir"/mem-*; do
       [ -f "$mf" ] || continue
       n="${mf##*/mem-}"
-      mem_line=$(process_memory_block "$mf" "$sid" "$n")
+      mem_line=$(process_memory_block "$mf" "$sid" "$n" "$cwd")
       mem_result="${mem_result}${mem_line}
 "
     done

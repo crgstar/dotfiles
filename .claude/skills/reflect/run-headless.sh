@@ -429,7 +429,7 @@ process_proposal_block() { # $1=blockfile $2=sid $3=n $4=cwd $5=supersedes(省�
   body_file=$(mktemp "${TMPDIR:-/tmp/}reflect-prop-body-XXXXXX")
 
   # why ヘッダ読取: process_memory_block と同じ流儀。target/kind/title は
-  # 先頭の "---" 行までのメタデータ、それ以降 (## 理由 / ## 変更例) は
+  # 先頭の "---" 行までのメタデータ、それ以降 (## 理由 / ## 変更内容) は
   # 一字一句そのまま body_file に落とす
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$header_done" -eq 1 ]; then
@@ -543,7 +543,7 @@ build_regenerate_prompt() { # $1=元提案ファイル全文(frontmatter込み) 
   cat <<'EOF'
 /reflect の再提案 (regenerate) モードとして動いてください。SKILL.md の
 「§6a. 再提案 (regenerate) モード」に書かれたルールに従い、次の元提案と target の
-現在の内容を踏まえて変更例を作り直し、REFLECT-PROPOSAL ブロックをちょうど1個だけ
+現在の内容を踏まえて変更内容を作り直し、REFLECT-PROPOSAL ブロックをちょうど1個だけ
 返してください。それ以外の文章・前置き・後書きは書かないこと。
 
 ----- 元提案 (frontmatter + 本文) -----
@@ -784,7 +784,7 @@ title: 再生成されたテスト提案
 
 テスト再生成理由
 
-## 変更例
+## 変更内容
 
 \`\`\`append
 regenerated
@@ -1115,7 +1115,7 @@ EOF
   local blkp out2 id2
   blkp="$tmpdir/blkp-ok.txt"
   make_prop_block "$blkp" "$REFLECT_HOME/dotfiles/CLAUDE.md" "claude-md" "テスト提案" \
-    $'## 理由\nテスト理由\n\n## 変更例\n\n```append\nhello\n```'
+    $'## 理由\nテスト理由\n\n## 変更内容\n\n```append\nhello\n```'
   if out2=$(process_proposal_block "$blkp" "$sid" 1 "/cwd/ok") \
     && id2=$(printf '%s' "$out2" | sed -n 's/^提案: \([^ ]*\) .*/\1/p') \
     && [ -f "$REFLECT_PROPOSALS_DIR/pending/$id2.md" ] \

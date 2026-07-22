@@ -105,6 +105,7 @@ A 系は retro §5 に準拠（参照）。B 系は項目単位で失敗を記�
 - B のうち**推奨先が memory のもの**は `REFLECT-MEMORY` ブロック（後述）で返す。書き込みはドライバが行う。
 - **それ以外の B**（CLAUDE.md・任意ドキュメント・権限見直し等、dotfiles 管理ファイルに限らない対象宛）は `REFLECT-PROPOSAL` ブロック（後述）で返す。保存はドライバが行う（人間の採用/破棄判断は常設ビューアが担う。本スキルはファイル移動や対象ファイルへの適用を行わない）。
   - **target は必ず実在しうる具体的な絶対パス 1 つに落とす**。権限見直しや運用方針のように特定ファイルに直結しない教訓は、その方針を書き込むべき統轄ドキュメント（例: 権限なら該当 `settings.json`、汎用の作法なら効かせたい階層の `CLAUDE.md`）を target に選ぶ。どのファイルにも紐づけられないものは提案として成立しないので**落とす**（空・相対 target で返すとドライバが毎晩 hold に積むだけになる。ビューアに乗る形にできないなら §2 の「迷ったら落とす」で処理する）。
+  - **target は勘で確定させず、必要なら read-only additionalDirectories（`~/projects`・`~/dotfiles`）経由で実在・現状を確認する**。
 - memory の書き込み先ディレクトリは「引数 transcript と同じディレクトリ直下の `memory/`」（= `dirname(transcript)/memory/`。プロジェクト名のエスケープ計算はしない）。
 - **重複抑止**: B の各項目を確定する前に、(1) 上記 memory ディレクトリの `MEMORY.md` と関連既存ファイル、(2) `~/dotfiles/.local/reflect-proposals/pending/` の既存提案ファイルの title/target を読む。同趣旨が既にあれば新規作成せず、memory 宛は `mode: update`（既存ファイルの全文置換）にし、提案宛はその項目自体を落とす（提案には update の仕組みがない）。人間確認が無いので、memory・提案のどちらも**迷ったら落とす**（採用バーは §2 のまま。人間確認が消える分をここで補う）。
 - ファイル本文は auto-memory 規約に従う（frontmatter: `name` / `description` / `metadata.type`、body に **Why:** / **How to apply:**）。
@@ -190,5 +191,6 @@ REFLECT-SUMMARY>>>
   1. **元提案ファイルの全文**（frontmatter を含む。`target` / `kind` / `title` / `note` / `## 理由` を含む）
   2. **target の現在の内容**（ドライバが読めた場合は全文。読めない・存在しない場合は「target 不在」である旨を明示したプレースホルダに置き換わる）
 - **やること**: 上記 2 つを踏まえ、元の変更内容がなぜ古くなったか（`note` の指摘・target 側の変化・hook エラー等）を汲み、target の現在の内容に対して素直に適用できる変更内容を作り直す。`target` / `kind` および `title` が指す大まかな意図は維持してよいが、`## 変更内容` は作り直してよい（前提が変わっているので、旧 before/after にこだわらない）
+  - **埋め込まれた 2 つの入力だけで判断がつかない場合は、勘で埋めず read-only additionalDirectories（`~/projects`・`~/dotfiles`）経由で target 周辺を調査してよい**。
 - **出力**: §6 の `REFLECT-PROPOSAL` ブロックをちょうど 1 個だけ返す。マーカー外に文章を一切置かない。`REFLECT-SUMMARY` 等の他マーカーは不要（このモードは 1 提案の作り直し専用で、A 系・memory 系の判断は行わない）。`id` / `supersedes` 等の frontmatter はここでも書かない（ドライバが付与する。§6 の frontmatter 規約と同じ）
 - **作り直しに失敗する**場合（target 不在で変更内容が成立しない・判断がつかない等）は、無理に空や不完全な提案を返さず `REFLECT-PROPOSAL` ブロック自体を省略してよい。ドライバは「ブロック欠落 = 失敗」として元提案を `status: regenerate` のまま pending に残す（決定13a: ロールバックすべき副作用が無いため安全。次回の再提案サイクルでまた拾われる）

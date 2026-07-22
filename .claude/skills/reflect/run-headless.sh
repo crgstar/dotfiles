@@ -22,6 +22,9 @@
 #                       (default: 300)
 #   REFLECT_REGENERATE_TIMEOUT 再提案 (regenerate) 1 件あたりの上限秒
 #                       (default: REFLECT_TIMEOUT と同じ)
+#   REFLECT_CWD        ヘッドレス claude の起動 cwd (必須。target リポジトリを
+#                       read-only additionalDirectories 越しに直接読ませるための
+#                       専用プロジェクトのパスを指定する)
 #
 # --regenerate-only モード: 通常の queue (transcript) 処理をスキップし、
 # pending の status: regenerate だけを拾って作り直す (設計書 決定13a)。
@@ -46,7 +49,14 @@ TIMEOUT_SEC="${REFLECT_TIMEOUT:-3600}"
 MIN_GROWTH="${REFLECT_MIN_GROWTH:-50}"
 SANITIZE_TIMEOUT_SEC="${REFLECT_SANITIZE_TIMEOUT:-300}"
 REGEN_TIMEOUT_SEC="${REFLECT_REGENERATE_TIMEOUT:-$TIMEOUT_SEC}"
-DOTFILES_DIR="$HOME/dotfiles"
+# why 専用 cwd かつ必須: ヘッドレス claude の cwd を dotfiles にすると additionalDirectories
+# を広げない限り target リポジトリ本体を読めない。read-only な additionalDirectories
+# (target を含む階層, ~/dotfiles) だけを持つ専用プロジェクトを cwd にすることで、通常の
+# dotfiles 作業セッションの権限には影響を与えずに target を直接読めるようにする
+# (SKILL.md 群は ~/.claude/skills/* からのシンボリックリンク経由で解決されるため、
+# cwd を dotfiles から外しても読める)。デフォルト値は環境固有パスになるため持たせず、
+# 未設定時はここで打ち切る
+: "${REFLECT_CWD:?REFLECT_CWD を設定してください (read-only additionalDirectories で target を読める専用プロジェクトのパス)}"
 # why 単一定義: extract_block と split_blocks (memory/proposal 共通) の状態機械は
 # 同じタグ集合を見ないと「片方だけが開始マーカーを認識する」ずれが起き、引用と
 # 実ブロックの判定が関数間で食い違う。タグ追加時はここだけ変える
@@ -373,7 +383,7 @@ parse_sanitize_marker() { # stdin=claude 出力。"pass" / "flagged <理由>" / 
 }
 
 invoke_sanitize_claude() { # $1=プロンプト全文。stdout=claude 生出力 (副作用。self_test で差し替え可能)
-  (cd "$DOTFILES_DIR" && REFLECT_HEADLESS=1 \
+  (cd "$REFLECT_CWD" && REFLECT_HEADLESS=1 \
     perl -e 'alarm shift @ARGV; exec @ARGV' "$SANITIZE_TIMEOUT_SEC" \
     "$CLAUDE_BIN" -p "$1" --permission-mode dontAsk --model "$MODEL" </dev/null 2>>"$LOG")
 }
@@ -557,7 +567,7 @@ EOF
 }
 
 invoke_regenerate_claude() { # $1=プロンプト全文。stdout=claude 生出力 (副作用。self_test で差し替え可能)
-  (cd "$DOTFILES_DIR" && REFLECT_HEADLESS=1 \
+  (cd "$REFLECT_CWD" && REFLECT_HEADLESS=1 \
     perl -e 'alarm shift @ARGV; exec @ARGV' "$REGEN_TIMEOUT_SEC" \
     "$CLAUDE_BIN" -p "$1" --permission-mode dontAsk --model "$MODEL" </dev/null 2>>"$LOG")
 }
@@ -626,7 +636,7 @@ process_regenerate_item() { # $1=status:regenerateの提案ファイル。1件�
   printf '%s\n' "$block" >"$tmp_block"
   sid="regenerate-${old_id}"
 
-  if save_out=$(process_proposal_block "$tmp_block" "$sid" 1 "$DOTFILES_DIR" "$old_id"); then
+  if save_out=$(process_proposal_block "$tmp_block" "$sid" 1 "$REFLECT_CWD" "$old_id"); then
     rm -f "$tmp_block"
     new_id=$(printf '%s' "$save_out" | sed -n 's/^提案: \([^ ]*\) .*/\1/p')
     if [ -n "$new_id" ] && finalize_regenerate_source "$file" "$archdir"; then
@@ -1632,12 +1642,14 @@ else
     fi
 
     log "$sid: 処理開始 ($path)${since_arg:+ [再処理: $recorded 行以降の差分]}"
-    # why cd $DOTFILES_DIR: ヘッドレスでは cwd + additionalDirectories (~/.claude)
-    # だけが読める。dotfiles を cwd にすると SKILL.md 群と transcript
-    # (~/.claude/projects/) の両方が追加権限なしで読める。
+    # why cd $REFLECT_CWD: ヘッドレスでは cwd + additionalDirectories だけが読める。
+    # REFLECT_CWD が指す専用プロジェクトの settings.json が持つ read-only
+    # additionalDirectories 越しに target リポジトリ本体・SKILL.md 群
+    # (シンボリックリンク経由) が読める。transcript (~/.claude/projects/) は
+    # グローバル設定の additionalDirectories (~/.claude) で読める
     # why perl alarm: macOS に timeout(1) がない。ハングすると lock を握ったまま
     # 翌晩以降も塞ぐので上限必須 (SIGALRM で claude ごと落とす)
-    out=$(cd "$DOTFILES_DIR" && REFLECT_HEADLESS=1 \
+    out=$(cd "$REFLECT_CWD" && REFLECT_HEADLESS=1 \
       perl -e 'alarm shift @ARGV; exec @ARGV' "$TIMEOUT_SEC" \
       "$CLAUDE_BIN" -p "/reflect --auto $path$since_arg" \
       --permission-mode dontAsk --model "$MODEL" </dev/null 2>>"$LOG")

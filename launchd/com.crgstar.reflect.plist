@@ -6,12 +6,14 @@
     <string>com.crgstar.reflect</string>
     <!-- why zsh -c 経由: launchd は ProgramArguments 内の環境変数や ~ を展開
          しないため、$HOME 展開をシェルに任せる。ログ出力先も同じ理由で
-         StandardOutPath ではなく run-headless.sh 自身の exec リダイレクトに置く -->
+         StandardOutPath ではなく run-headless.sh 自身の exec リダイレクトに置く。
+         REFLECT_CWD 等の環境固有値は公開リポの plist に直書きできないため、
+         未追跡のローカル env ファイルがあれば source してから起動する -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/zsh</string>
         <string>-c</string>
-        <string>exec "$HOME/dotfiles/.claude/skills/reflect/run-headless.sh"</string>
+        <string>[ -f "$HOME/.config/reflect/env.local" ] &amp;&amp; source "$HOME/.config/reflect/env.local"; exec "$HOME/dotfiles/.claude/skills/reflect/run-headless.sh"</string>
     </array>
     <!-- 夜間 3:00 に 1 回。スリープ中に飛んだ回は復帰時に launchd が catch-up
          するが、電源オフ中の回はスキップされる (次の 3:00 まで処理されない) -->

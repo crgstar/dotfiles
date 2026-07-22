@@ -25,6 +25,7 @@ description: >
   git diff "$BASE"...HEAD
   ```
 - 未コミット変更があれば、含めて commit するか stash するかをユーザに確認する。`git add -A` は使わない。
+- **対応する Issue をユーザに必ず聞く**（「この PR に紐づく Issue はありますか？あれば `owner/repo#N` で教えてください。無ければ『無し』でも OK」）。Issue がある場合のリンク手順は `gh-projects` に従う。cross-repo は PR 作成 *前* に linked branch を用意する必要があるため、Phase 6 に進む前にここで確定させる。
 
 ## Phase 2: 既存 PR から慣習を把握
 

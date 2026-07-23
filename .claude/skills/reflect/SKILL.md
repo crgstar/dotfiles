@@ -105,6 +105,7 @@ A 系は retro §5 に準拠（参照）。B 系は項目単位で失敗を記�
 - B のうち**推奨先が memory のもの**は `REFLECT-MEMORY` ブロック（後述）で返す。書き込みはドライバが行う。
 - **それ以外の B**（CLAUDE.md・任意ドキュメント・権限見直し等、dotfiles 管理ファイルに限らない対象宛）は `REFLECT-PROPOSAL` ブロック（後述）で返す。保存はドライバが行う（人間の採用/破棄判断は常設ビューアが担う。本スキルはファイル移動や対象ファイルへの適用を行わない）。
   - **target は必ず実在しうる具体的な絶対パス 1 つに落とす**。権限見直しや運用方針のように特定ファイルに直結しない教訓は、その方針を書き込むべき統轄ドキュメント（例: 権限なら該当 `settings.json`、汎用の作法なら効かせたい階層の `CLAUDE.md`）を target に選ぶ。どのファイルにも紐づけられないものは提案として成立しないので**落とす**（空・相対 target で返すとドライバが毎晩 hold に積むだけになる。ビューアに乗る形にできないなら §2 の「迷ったら落とす」で処理する）。
+  - **ユーザグローバル CLAUDE.md への教訓は `~/dotfiles/.claude/CLAUDE.md` を target にする**（`~/.claude/CLAUDE.md` は setup.sh が再生成する gitignore 済み merged ファイルへの symlink で、生成元でないため採用不能）。
   - **target は勘で確定させず、必要なら read-only additionalDirectories（`~/projects`・`~/dotfiles`）経由で実在・現状を確認する**。
 - memory の書き込み先ディレクトリは「引数 transcript と同じディレクトリ直下の `memory/`」（= `dirname(transcript)/memory/`。プロジェクト名のエスケープ計算はしない）。
 - **重複抑止**: B の各項目を確定する前に、(1) 上記 memory ディレクトリの `MEMORY.md` と関連既存ファイル、(2) `~/dotfiles/.local/reflect-proposals/pending/` の既存提案ファイルの title/target を読む。同趣旨が既にあれば新規作成せず、memory 宛は `mode: update`（既存ファイルの全文置換）にし、提案宛はその項目自体を落とす（提案には update の仕組みがない）。人間確認が無いので、memory・提案のどちらも**迷ったら落とす**（採用バーは §2 のまま。人間確認が消える分をここで補う）。

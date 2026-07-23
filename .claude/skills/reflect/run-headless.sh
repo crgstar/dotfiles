@@ -24,7 +24,8 @@
 #                       (default: REFLECT_TIMEOUT と同じ)
 #   REFLECT_CWD        ヘッドレス claude の起動 cwd (必須。target リポジトリを
 #                       read-only additionalDirectories 越しに直接読ませるための
-#                       専用プロジェクトのパスを指定する)
+#                       専用プロジェクトのパスを指定する。未設定なら
+#                       ~/.config/reflect/env.local を source して補う)
 #
 # --regenerate-only モード: 通常の queue (transcript) 処理をスキップし、
 # pending の status: regenerate だけを拾って作り直す (設計書 決定13a)。
@@ -55,8 +56,14 @@ REGEN_TIMEOUT_SEC="${REFLECT_REGENERATE_TIMEOUT:-$TIMEOUT_SEC}"
 # dotfiles 作業セッションの権限には影響を与えずに target を直接読めるようにする
 # (SKILL.md 群は ~/.claude/skills/* からのシンボリックリンク経由で解決されるため、
 # cwd を dotfiles から外しても読める)。デフォルト値は環境固有パスになるため持たせず、
-# 未設定時はここで打ち切る
-: "${REFLECT_CWD:?REFLECT_CWD を設定してください (read-only additionalDirectories で target を読める専用プロジェクトのパス)}"
+# 未設定なら env.local を読み、それでも無ければ打ち切る。
+# why fallback source: launchd 経由は plist が env.local を source してから起動するが、
+# 提案ビューアの「再提案の今すぐ実行」ボタンや手動実行はこのスクリプトを直接起動する。
+# 環境固有値の定義を env.local 1 箇所に保ったまま、どの経路でも同じ値が入るようにする
+if [ -z "${REFLECT_CWD:-}" ] && [ -f "$HOME/.config/reflect/env.local" ]; then
+  . "$HOME/.config/reflect/env.local"
+fi
+: "${REFLECT_CWD:?REFLECT_CWD を設定してください (read-only additionalDirectories で target を読める専用プロジェクトのパス。~/.config/reflect/env.local に export を書いても可)}"
 # why 単一定義: extract_block と split_blocks (memory/proposal 共通) の状態機械は
 # 同じタグ集合を見ないと「片方だけが開始マーカーを認識する」ずれが起き、引用と
 # 実ブロックの判定が関数間で食い違う。タグ追加時はここだけ変える
@@ -325,22 +332,59 @@ frontmatter_value() { # $1=提案/memoryファイル $2=キー名。frontmatter 
   ' "$file"
 }
 
-target_is_public_dotfiles() { # $1=絶対パス。$HOME/dotfiles/ 配下 (= ③ PUBLIC リポ宛) なら 0 (純粋関数)
+target_is_public_dotfiles() { # $1=絶対パス。$HOME/dotfiles/ 配下 (= ③ PUBLIC リポ宛) なら 0
   # why REFLECT_HOME 経由: derive_repo と同じ流儀で self-test から差し替え可能にする
-  local path="$1" home="${REFLECT_HOME:-$HOME}"
+  # why symlink 解決: target が ~/.claude/CLAUDE.md → ~/dotfiles/.claude/CLAUDE.merged.md の
+  # ような symlink の場合、文字列のままでは dotfiles 配下と判定できず sanitize がスキップされる。
+  # 消費側の提案ビューアは realpath で実体を解決してから ③ 判定するため、ここでも実在すれば
+  # symlink を解決してから揃える (実在しない場合は解決できないため文字列のまま判定=フォールバック)。
+  # readlink -f は macOS 標準 (BSD readlink, Darwin) でも Linux (GNU coreutils) でも
+  # 動作するため、スクリプト既存の依存範囲を超えない
+  local path="$1" home="${REFLECT_HOME:-$HOME}" resolved
+  # why path 実在時のみ解決: 実在しないパス (self-test の非symlinkケース等) は
+  # readlink -f できないため従来どおり文字列比較のフォールバックにする。
+  # why 実在時は home 側も解決: macOS の $TMPDIR (self-test 用) 自体が
+  # /var -> /private/var の symlink であることがあり、path 側だけ解決すると
+  # 比較対象がずれて誤判定になる (home は非解決の生文字列のまま残す必要がある)
+  if [ -e "$path" ] && resolved=$(readlink -f "$path" 2>/dev/null) && [ -n "$resolved" ]; then
+    path="$resolved"
+    if [ -e "$home" ] && resolved=$(readlink -f "$home" 2>/dev/null) && [ -n "$resolved" ]; then
+      home="$resolved"
+    fi
+  fi
   case "$path" in
     "$home"/dotfiles/*) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-insert_sanitized_line() { # $1=提案ファイル $2=値 ("pass" または "flagged <理由>")。
-  # created: 行の直後に "sanitized: <値>" を挿入する (原子的。他の行は変更しない)
-  local file="$1" value="$2" tmp
-  tmp=$(mktemp "$(dirname "$file")/.reflect-sanitize-XXXXXX") || return 1
-  if ! awk -v val="$value" '
+canonicalize_target() { # $1=target値。stdout=正規化後の値 (純粋関数)
+  # why このマッピング: ユーザグローバル CLAUDE.md についての教訓を提案するとき、
+  # ヘッドレス LLM は "$HOME/.claude/CLAUDE.md" を target に選びがちだが、これは
+  # setup.sh が「dotfiles/.claude/CLAUDE.md (共通・公開) + .claude/CLAUDE.local/<環境>.md」
+  # から再生成する gitignore 済みファイル ($HOME/dotfiles/.claude/CLAUDE.merged.md への
+  # symlink) の実体。ここを target にした提案は消費側の提案ビューアで構造的に採用不能
+  # (HEAD に存在しない・git add 不可・setup.sh 再実行で上書きされる) なため、
+  # 生成元である $HOME/dotfiles/.claude/CLAUDE.md に決定的に書き換える。
+  # 他の値はすべて素通し (それ以外の生成物パスは今のところ未確認のため、既知の
+  # 1 パターンだけを狭く救う)
+  local value="$1" home="${REFLECT_HOME:-$HOME}"
+  if [ "$value" = "$home/.claude/CLAUDE.md" ]; then
+    printf '%s' "$home/dotfiles/.claude/CLAUDE.md"
+  else
+    printf '%s' "$value"
+  fi
+}
+
+insert_frontmatter_line_after() { # $1=file $2=anchor行の先頭一致正規表現 $3=挿入する行テキスト。
+  # anchor に最初にマッチした行の直後に $3 を挿入する (原子的。他の行は変更しない)。
+  # why 汎用化: insert_sanitized_line (created: の直後) と insert_attempts_line
+  # (sanitized: または created: の直後) が同じ「1行挿入」の状態機械を二重保守しない
+  local file="$1" anchor="$2" line="$3" tmp
+  tmp=$(mktemp "$(dirname "$file")/.reflect-fmline-XXXXXX") || return 1
+  if ! awk -v anchor="$anchor" -v ln="$line" '
     { print }
-    $0 ~ /^created:/ && !done { print "sanitized: " val; done = 1 }
+    $0 ~ anchor && !done { print ln; done = 1 }
   ' "$file" >"$tmp"; then
     rm -f "$tmp"
     return 1
@@ -348,24 +392,124 @@ insert_sanitized_line() { # $1=提案ファイル $2=値 ("pass" または "flag
   mv "$tmp" "$file"
 }
 
-build_sanitize_prompt() { # $1=提案ファイル全文。stdout=ヘッドレス claude への監査プロンプト (純粋関数)
-  cat <<'EOF'
-以下はローカルで生成された提案ファイル (dotfiles 配下の PUBLIC ファイルへの変更提案) です。
-まず ~/dotfiles/.claude/skills/process-retro/SKILL.md の §3.3(b) を読み、そこに書かれた
-サニタイズ判定基準 (絶対パス・組織名/他人の名前・秘密情報・作業リポ固有の識別子の混入
-有無) をそのまま適用してください。
+insert_sanitized_line() { # $1=提案ファイル $2=値 ("pass" または "flagged <理由>")。
+  # created: 行の直後に "sanitized: <値>" を挿入する
+  insert_frontmatter_line_after "$1" '^created:' "sanitized: $2"
+}
 
-判定対象は次の提案ファイル全文です (frontmatter を含む):
------ BEGIN PROPOSAL FILE -----
+insert_attempts_line() { # $1=提案ファイル $2=実施した監査回数(整数)。
+  # sanitized: 行があればその直後、なければ created: 行の直後に
+  # "sanitize_attempts: <値>" を挿入する。消費側の提案ビューアが「何回やり直して
+  # 不合格だったか」を表示するための契約キーで、監査失敗 (マーカー欠落) で
+  # sanitized: 行自体が無いケースでも attempts だけは分かる範囲でスタンプする
+  local file="$1" value="$2" anchor='^created:'
+  grep -q '^sanitized:' "$file" && anchor='^sanitized:'
+  insert_frontmatter_line_after "$file" "$anchor" "sanitize_attempts: $value"
+}
+
+extract_change_content_section() { # $1=提案ファイル。stdout="## 変更内容" 見出し行から、次の
+  # "## " 見出しの直前 (存在しなければ EOF) までを抜き出す (見出し行自体を含む。純粋関数)。
+  # why 見出しのみ抽出: build_sanitize_prompt の監査対象を「公開リポに実際に載る内容」に
+  # 絞るためのヘルパー。frontmatter や "## 理由" は target には適用されず監査不要
+  # (下記 build_sanitize_prompt の why 参照)。セクションが無い場合は空文字を返す
+  local file="$1"
+  awk '
+    /^## 変更内容/ { insec = 1 }
+    insec && /^## / && !/^## 変更内容/ { exit }
+    insec { print }
+  ' "$file"
+}
+
+replace_change_content_section() { # $1=提案ファイル $2=新しい "## 変更内容" セクション本文
+  # (見出し行を含む)。既存の "## 変更内容" セクション (次の "## " 見出し直前まで) を
+  # 丸ごと置き換える (原子的。それ以外の行・frontmatter は変更しない)。
+  # why resanitize 専用: 練り直しは title/target/kind の意図を変えず変更内容だけを
+  # 作り直す仕様のため、build_regenerate_prompt のようにファイル全体を再生成せず、
+  # 既存ファイルの該当セクションだけを差し替える
+  # why -v ではなくファイル経由で差し込む: macOS 標準 awk (BWK awk) は -v に
+  # 改行を含む複数行文字列を渡すと "newline in string" で構文エラーになる
+  # (gawk では通る差)。secfile に書き出して getline で読み込むことで
+  # スクリプト本体には改行を埋め込まずに済む
+  local file="$1" newsec="$2" tmp secfile
+  tmp=$(mktemp "$(dirname "$file")/.reflect-resani-XXXXXX") || return 1
+  secfile=$(mktemp "$(dirname "$file")/.reflect-resani-sec-XXXXXX") || { rm -f "$tmp"; return 1; }
+  printf '%s\n' "$newsec" >"$secfile"
+  if ! awk -v secfile="$secfile" '
+    /^## 変更内容/ && !done {
+      while ((getline line < secfile) > 0) print line
+      close(secfile)
+      insec = 1; done = 1; next
+    }
+    insec && /^## / && !/^## 変更内容/ { insec = 0 }
+    insec { next }
+    { print }
+  ' "$file" >"$tmp"; then
+    rm -f "$tmp" "$secfile"
+    return 1
+  fi
+  rm -f "$secfile"
+  mv "$tmp" "$file"
+}
+
+build_sanitize_prompt() { # $1=title (frontmatter) $2=変更内容セクション本文。
+  # stdout=ヘッドレス claude への監査プロンプト (純粋関数)
+  # why 全文でなく title + 変更内容に限定: 提案ビューアが承認時に公開リポへ
+  # 実際にコミットするのは (1) コミットメッセージ "proposal: <id> <title>" と
+  # (2) "## 変更内容" を target へ機械適用した結果、の2つのみ (frontmatter と "## 理由" は
+  # 一切載らない)。frontmatter には target/source_cwd 由来の絶対パス・作業リポ名が構造上
+  # 必ず含まれるため、全文監査だと「非公開の frontmatter に絶対パスがある」という誤検知
+  # (flagged) が常に発生してしまう。公開される内容だけを渡すことでこれを解消する
+  cat <<'EOF'
+以下は、ローカルで生成された提案のうち、承認されると公開 dotfiles リポにそのまま
+コミットされる内容 (コミットメッセージに載るタイトルと、target ファイルに適用される
+変更内容) です。まず ~/dotfiles/.claude/skills/process-retro/SKILL.md の §3.3(b) を読み、
+そこに書かれたサニタイズ判定基準 (絶対パス・組織名/他人の名前・秘密情報・作業リポ固有の
+識別子の混入有無) をそのまま適用してください。
+
+判定対象のタイトル:
 EOF
   printf '%s\n' "$1"
   cat <<'EOF'
------ END PROPOSAL FILE -----
+
+判定対象の変更内容 (target への適用結果):
+----- BEGIN CHANGE CONTENT -----
+EOF
+  printf '%s\n' "$2"
+  cat <<'EOF'
+----- END CHANGE CONTENT -----
 
 出力は次のいずれか1行のみとしてください。説明・前置き・後書きは一切書かないこと:
 REFLECT-SANITIZE: pass
 REFLECT-SANITIZE: flagged <漏洩理由を一行で>
 EOF
+}
+
+build_resanitize_prompt() { # $1=元提案ファイル全文(frontmatter込み) $2=flag理由 $3=targetの現在の内容。
+  # stdout=サニタイズ差し戻し用の練り直しプロンプト (純粋関数)
+  # why build_regenerate_prompt を流用しない: 骨格 (元提案+target現在内容を渡し
+  # REFLECT-PROPOSAL を1個返させる) は同じだが、意図が別物 (夜間の内容作り直しではなく
+  # 「flag された漏洩要素だけを除去する」)。title/target/kind の意図は維持させたいので
+  # そのことを明示し、変更内容以外に手を入れさせない
+  cat <<'EOF'
+以下の提案は、サニタイズ監査 (~/dotfiles/.claude/skills/process-retro/SKILL.md の §3.3(b) に
+書かれた判定基準) で flagged と判定されました。指摘された漏洩理由の要素だけを取り除いて
+"## 変更内容" を作り直してください。title / target / kind が表す意図 (何について・どの
+ファイルに対する提案か) は変更しないこと。target の現在の内容も参考にして、適用結果が
+引き続き妥当であることを確認してください。REFLECT-PROPOSAL ブロックをちょうど1個だけ
+返してください。それ以外の文章・前置き・後書きは一切書かないこと。
+
+----- 元提案 (frontmatter + 本文) -----
+EOF
+  printf '%s\n' "$1"
+  cat <<'EOF'
+----- flag 理由 -----
+EOF
+  printf '%s\n' "$2"
+  cat <<'EOF'
+----- target の現在の内容 -----
+EOF
+  printf '%s\n' "$3"
+  echo "----- (以上) -----"
 }
 
 parse_sanitize_marker() { # stdin=claude 出力。"pass" / "flagged <理由>" / "" (欠落・不正) を返す (純粋関数)
@@ -388,12 +532,61 @@ invoke_sanitize_claude() { # $1=プロンプト全文。stdout=claude 生出力 
     "$CLAUDE_BIN" -p "$1" --permission-mode dontAsk --model "$MODEL" </dev/null 2>>"$LOG")
 }
 
+invoke_resanitize_claude() { # $1=プロンプト全文。stdout=claude 生出力 (副作用。self_test で差し替え可能)
+  # why sanitize と同じ SANITIZE_TIMEOUT を使う: 練り直しも「公開リポ行きの内容を
+  # 直す」sanitize フローの一部であり、regenerate (夜間の内容作り直し) とは
+  # 別のタイムアウト予算にする理由がない
+  (cd "$REFLECT_CWD" && REFLECT_HEADLESS=1 \
+    perl -e 'alarm shift @ARGV; exec @ARGV' "$SANITIZE_TIMEOUT_SEC" \
+    "$CLAUDE_BIN" -p "$1" --permission-mode dontAsk --model "$MODEL" </dev/null 2>>"$LOG")
+}
+
+resanitize_change_content() { # $1=提案ファイル $2=flagged判定の値("flagged <理由>") $3=target絶対パス。
+  # flag 理由を差し戻して "## 変更内容" だけを作り直させ、成功すればファイルへ
+  # 反映する (副作用。戻り値 0=反映成功 / 1=練り直し失敗・ファイル未変更)
+  local file="$1" flagged_value="$2" target="$3" reason orig target_content
+  local prompt resp block blockfile newsec
+  reason="${flagged_value#flagged }"
+  orig=$(cat "$file")
+  if [ -n "$target" ] && [ -f "$target" ]; then
+    target_content=$(cat "$target")
+  else
+    target_content="(target 不在: ${target:-<空>})"
+  fi
+
+  prompt=$(build_resanitize_prompt "$orig" "$reason" "$target_content")
+  resp=$(invoke_resanitize_claude "$prompt")
+  block=$(printf '%s\n' "$resp" | extract_block PROPOSAL)
+  if [ -z "$block" ]; then
+    log "$file: 練り直し失敗 (PROPOSAL ブロック欠落)"
+    return 1
+  fi
+
+  blockfile=$(mktemp "${TMPDIR:-/tmp/}reflect-resani-block-XXXXXX")
+  printf '%s\n' "$block" >"$blockfile"
+  newsec=$(extract_change_content_section "$blockfile")
+  rm -f "$blockfile"
+  if [ -z "$newsec" ]; then
+    log "$file: 練り直し結果に ## 変更内容 セクションが無い"
+    return 1
+  fi
+
+  replace_change_content_section "$file" "$newsec"
+}
+
 stamp_sanitize_if_needed() { # $1=保存済み提案ファイルの絶対パス。
   # target が ③ (dotfiles配下) のときだけ sanitize 監査を実行し frontmatter に
-  # sanitized: pass|flagged をスタンプする (決定12)。stdout: 呼び出し元の結果行に
-  # そのまま連結できる " (...)" 形の注記 (③以外は空文字)。監査失敗・マーカー欠落は
-  # スタンプを書かない (安全側の既定。決定12) が、提案の保存自体は失敗にしない
-  local file="$1" target raw parsed value
+  # sanitized: pass|flagged と sanitize_attempts: <実施した監査回数> をスタンプする
+  # (決定12 + ユーザ確定仕様の練り直しループ)。stdout: 呼び出し元の結果行に
+  # そのまま連結できる " (...)" 形の注記 (③以外は空文字)。
+  # why 練り直しは最大2回 (監査は最大3回): flagged のたびに flag 理由を差し戻して
+  # "## 変更内容" を作り直させ、再監査する。途中で pass になればその内容で確定し、
+  # 3回目 (=2回練り直した後) も flagged なら見送りにはせず、最後の内容のまま
+  # pending に残し sanitized: flagged <理由> をスタンプする (ユーザ確定仕様)。
+  # sanitize_attempts は「実施した監査 (invoke_sanitize_claude 呼び出し) の回数」を
+  # 数える契約キーで、1 = 一発 pass/flagged、練り直しをした分だけ増える
+  local file="$1" target title change_section raw parsed value attempt=0
+  local max_regens=2 # 練り直しの上限回数 (監査上限 = max_regens + 1)
   target=$(frontmatter_value "$file" target)
   target_is_public_dotfiles "$target" || { echo ""; return 0; }
 
@@ -402,35 +595,47 @@ stamp_sanitize_if_needed() { # $1=保存済み提案ファイルの絶対パス�
     return 0
   fi
 
-  raw=$(invoke_sanitize_claude "$(build_sanitize_prompt "$(cat "$file")")")
-  parsed=$(printf '%s\n' "$raw" | parse_sanitize_marker)
+  while :; do
+    attempt=$((attempt + 1))
+    title=$(frontmatter_value "$file" title)
+    change_section=$(extract_change_content_section "$file")
+    raw=$(invoke_sanitize_claude "$(build_sanitize_prompt "$title" "$change_section")")
+    parsed=$(printf '%s\n' "$raw" | parse_sanitize_marker)
 
-  case "$parsed" in
-    pass)
-      if insert_sanitized_line "$file" "pass"; then
-        echo " (sanitized: pass)"
-        return 0
-      fi
-      log "$file: sanitized 行の挿入に失敗"
-      echo " (sanitize 判定 pass だがスタンプ書き込み失敗)"
-      return 1
-      ;;
-    flagged*)
-      value="$parsed"
-      if insert_sanitized_line "$file" "$value"; then
-        echo " (sanitized: $value)"
-        return 0
-      fi
-      log "$file: sanitized 行の挿入に失敗"
-      echo " (sanitize 判定 flagged だがスタンプ書き込み失敗)"
-      return 1
-      ;;
-    *)
-      log "$file: sanitize 監査失敗またはマーカー欠落。スタンプなし (自動処理対象外のまま)"
-      echo " (sanitize 監査失敗: スタンプなし。自動処理対象外のまま)"
-      return 1
-      ;;
-  esac
+    case "$parsed" in
+      pass)
+        if insert_sanitized_line "$file" "pass" && insert_attempts_line "$file" "$attempt"; then
+          echo " (sanitized: pass, sanitize_attempts: $attempt)"
+          return 0
+        fi
+        log "$file: sanitized 行の挿入に失敗"
+        echo " (sanitize 判定 pass だがスタンプ書き込み失敗)"
+        return 1
+        ;;
+      flagged*)
+        value="$parsed"
+        if [ "$attempt" -le "$max_regens" ]; then
+          if resanitize_change_content "$file" "$value" "$target"; then
+            continue # 練り直し成功 -> 作り直した内容で再監査する
+          fi
+          log "$file: 練り直しに失敗。直前の flagged 判定のままスタンプして打ち切る"
+        fi
+        if insert_sanitized_line "$file" "$value" && insert_attempts_line "$file" "$attempt"; then
+          echo " (sanitized: $value, sanitize_attempts: $attempt)"
+          return 0
+        fi
+        log "$file: sanitized 行の挿入に失敗"
+        echo " (sanitize 判定 flagged だがスタンプ書き込み失敗)"
+        return 1
+        ;;
+      *)
+        log "$file: sanitize 監査失敗またはマーカー欠落。スタンプなし (自動処理対象外のまま)"
+        insert_attempts_line "$file" "$attempt" || true
+        echo " (sanitize 監査失敗: スタンプなし。自動処理対象外のまま)"
+        return 1
+        ;;
+    esac
+  done
 }
 
 process_proposal_block() { # $1=blockfile $2=sid $3=n $4=cwd $5=supersedes(省略可)。結果行を stdout に1行 (成否は戻り値)
@@ -456,6 +661,11 @@ process_proposal_block() { # $1=blockfile $2=sid $3=n $4=cwd $5=supersedes(省�
       title:*) title=$(trim "${line#title:}") ;;
     esac
   done <"$blockfile"
+
+  # why ここで正規化: 新規生成・再提案 (regenerate) はどちらもこの関数を通るため、
+  # 1 箇所で両経路に効く。絶対パス検証より前に正規化することで、正規化後の値を
+  # 検証・保存する (canonicalize_target の why は定義側参照)
+  target=$(canonicalize_target "$target")
 
   case "$target" in
     /*) ;;
@@ -767,16 +977,65 @@ self_test() {
   ng() { fail=$((fail + 1)); echo "FAIL: $1"; }
 
   # why スタブ差し替え: self_test は実 claude を絶対に呼ばない
-  # (完了条件「実データに触れない」の一部)。sanitize/regenerate の
-  # 呼び出し関数をここで上書きし、$SANITIZE_STUB_MODE / $REGENERATE_STUB_MODE
-  # (どちらも下の local 変数。動的スコープで見える) で挙動を切り替える
+  # (完了条件「実データに触れない」の一部)。sanitize/resanitize/regenerate の
+  # 呼び出し関数をここで上書きし、$SANITIZE_STUB_MODE / $RESANITIZE_STUB_MODE /
+  # $REGENERATE_STUB_MODE (どちらも下の local 変数。動的スコープで見える) で
+  # 挙動を切り替える。
+  # why 呼び出し回数をファイルで数える: stamp_sanitize_if_needed は
+  # invoke_sanitize_claude / invoke_resanitize_claude を `raw=$(...)` 形の
+  # コマンド置換 (= サブシェル) 越しに呼ぶ。サブシェル内の変数代入は呼び出し元に
+  # 反映されないため、シェル変数のインクリメントでは呼び出し回数を跨いで数えられない
+  # (試して実際に壊れた: 何度呼んでも「1回目」の値しか返らなかった)。
+  # ファイル I/O はサブシェルをまたいで永続するので、そちらで数える
+  local SANITIZE_CALL_FILE="$tmpdir/sanitize-call-n" RESANITIZE_CALL_FILE="$tmpdir/resanitize-call-n"
+  reset_stub_call_counts() { echo 0 >"$SANITIZE_CALL_FILE"; echo 0 >"$RESANITIZE_CALL_FILE"; }
+  reset_stub_call_counts
+
+  # why SANITIZE_STUB_MODE をスペース区切りの列にする: 練り直しループのテストは
+  # 「1回目 flagged、練り直し後の2回目 pass」のような呼び出しごとに違う判定を
+  # 返す必要がある。N 回目の語を使い、単語数より多く呼ばれたら最後の語を使い回す
+  # (従来どおり単語1個の固定値指定も動く)
   local SANITIZE_STUB_MODE="pass"
   invoke_sanitize_claude() {
-    case "$SANITIZE_STUB_MODE" in
+    local n mode
+    n=$(( $(cat "$SANITIZE_CALL_FILE" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" >"$SANITIZE_CALL_FILE"
+    mode=$(printf '%s\n' "$SANITIZE_STUB_MODE" | awk -v n="$n" '{ print ($n != "" ? $n : $NF) }')
+    case "$mode" in
       pass) echo "REFLECT-SANITIZE: pass" ;;
       flagged) echo "REFLECT-SANITIZE: flagged 機密情報の疑いを検知" ;;
       missing) echo "説明文だけでマーカーがない出力" ;;
       *) echo "REFLECT-SANITIZE: pass" ;;
+    esac
+  }
+
+  local RESANITIZE_STUB_MODE="ok"
+  invoke_resanitize_claude() {
+    local n
+    n=$(( $(cat "$RESANITIZE_CALL_FILE" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" >"$RESANITIZE_CALL_FILE"
+    case "$RESANITIZE_STUB_MODE" in
+      ok)
+        cat <<EOF
+<<<REFLECT-PROPOSAL
+target: $REFLECT_HOME/dotfiles/CLAUDE.md
+kind: claude-md
+title: 練り直し後もタイトルは維持
+---
+## 理由
+
+練り直しテスト理由
+
+## 変更内容
+
+\`\`\`append
+resanitized-content-call-${n}
+\`\`\`
+REFLECT-PROPOSAL>>>
+EOF
+        ;;
+      missing-block) echo "PROPOSALブロックを返さない練り直し失敗ケース" ;;
+      *) echo "" ;;
     esac
   }
 
@@ -1273,6 +1532,45 @@ EOF
   if target_is_public_dotfiles "$REFLECT_HOME/dotfiles/CLAUDE.md"; then ok; else ng "target_is_public_dotfiles: dotfiles配下がNG判定"; fi
   if ! target_is_public_dotfiles "$REFLECT_HOME/projects/sample-project/CLAUDE.md"; then ok; else ng "target_is_public_dotfiles: 非dotfilesが通った"; fi
   if ! target_is_public_dotfiles ""; then ok; else ng "target_is_public_dotfiles: 空パスが通った"; fi
+  # why 実在 symlink での検証: ~/.claude/CLAUDE.md → ~/dotfiles/.claude/CLAUDE.merged.md の
+  # ような、実体は dotfiles 配下だが symlink 元のパスは配下でないケースの回帰防止
+  mkdir -p "$REFLECT_HOME/projects/sample-project"
+  : >"$REFLECT_HOME/dotfiles/CLAUDE.merged.md"
+  ln -sf "$REFLECT_HOME/dotfiles/CLAUDE.merged.md" "$REFLECT_HOME/projects/sample-project/CLAUDE.md.link"
+  if target_is_public_dotfiles "$REFLECT_HOME/projects/sample-project/CLAUDE.md.link"; then
+    ok
+  else
+    ng "target_is_public_dotfiles: dotfiles配下を指すsymlinkがNG判定"
+  fi
+
+  # --- canonicalize_target ---
+  if [ "$(canonicalize_target "$REFLECT_HOME/.claude/CLAUDE.md")" = "$REFLECT_HOME/dotfiles/.claude/CLAUDE.md" ]; then
+    ok
+  else
+    ng "canonicalize_target: \$HOME/.claude/CLAUDE.md が生成元に正規化されない"
+  fi
+  if [ "$(canonicalize_target "$REFLECT_HOME/dotfiles/CLAUDE.md")" = "$REFLECT_HOME/dotfiles/CLAUDE.md" ]; then
+    ok
+  else
+    ng "canonicalize_target: 該当しないパスが素通ししない"
+  fi
+  if [ "$(canonicalize_target "$REFLECT_HOME/projects/sample-project/.claude/CLAUDE.md")" = "$REFLECT_HOME/projects/sample-project/.claude/CLAUDE.md" ]; then
+    ok
+  else
+    ng "canonicalize_target: 別プロジェクト配下の .claude/CLAUDE.md まで書き換えた"
+  fi
+
+  # --- process_proposal_block: target 正規化が新規生成 (regenerate も同じ関数を通る) に効く ---
+  local blkpcanon out9 id9
+  blkpcanon="$tmpdir/blkp-canon.txt"
+  make_prop_block "$blkpcanon" "$REFLECT_HOME/.claude/CLAUDE.md" "claude-md" "target正規化テスト" "body"
+  if out9=$(process_proposal_block "$blkpcanon" "$sid" 28 "/cwd") \
+    && id9=$(printf '%s' "$out9" | sed -n 's/^提案: \([^ ]*\) .*/\1/p') \
+    && grep -q "^target: $REFLECT_HOME/dotfiles/.claude/CLAUDE.md$" "$REFLECT_PROPOSALS_DIR/pending/$id9.md"; then
+    ok
+  else
+    ng "process_proposal_block: \$HOME/.claude/CLAUDE.md の target が正規化されずに保存された ($out9)"
+  fi
 
   # --- parse_sanitize_marker ---
   if [ "$(printf 'REFLECT-SANITIZE: pass\n' | parse_sanitize_marker)" = "pass" ]; then
@@ -1316,25 +1614,78 @@ EOF
     ng "stamp_sanitize_if_needed: ③ (dotfiles) 以外はスタンプしない"
   fi
 
-  local pubflag="$tmpdir/pubflag-test.md"
-  { echo "---"; echo "id: z"; echo "target: $REFLECT_HOME/dotfiles/CLAUDE.md"; echo "created: 2026-07-15"; echo "---"; } >"$pubflag"
-  SANITIZE_STUB_MODE="flagged"
-  if stamp_sanitize_if_needed "$pubflag" | grep -q "sanitized: flagged" && grep -q "^sanitized: flagged" "$pubflag"; then
-    ok
-  else
-    ng "stamp_sanitize_if_needed: flagged 判定のスタンプ"
-  fi
-  SANITIZE_STUB_MODE="pass"
-
   local pubmiss="$tmpdir/pubmiss-test.md"
   { echo "---"; echo "id: w"; echo "target: $REFLECT_HOME/dotfiles/CLAUDE.md"; echo "created: 2026-07-15"; echo "---"; } >"$pubmiss"
-  SANITIZE_STUB_MODE="missing"
-  if ! stamp_sanitize_if_needed "$pubmiss" >/dev/null && ! grep -q "^sanitized:" "$pubmiss"; then
+  SANITIZE_STUB_MODE="missing"; reset_stub_call_counts
+  if ! stamp_sanitize_if_needed "$pubmiss" >/dev/null && ! grep -q "^sanitized:" "$pubmiss" \
+    && grep -q "^sanitize_attempts: 1$" "$pubmiss"; then
     ok
   else
-    ng "stamp_sanitize_if_needed: マーカー欠落時はスタンプなし (安全側の既定・決定12)"
+    ng "stamp_sanitize_if_needed: マーカー欠落時はスタンプなしだが attempts は分かる範囲でスタンプする (安全側の既定・決定12)"
   fi
-  SANITIZE_STUB_MODE="pass"
+  SANITIZE_STUB_MODE="pass"; reset_stub_call_counts
+
+  # --- stamp_sanitize_if_needed: 練り直しループ「1回目 flagged → 練り直し → 2回目 pass」 ---
+  # sanitize_attempts は「実施した監査回数」を数えるので、途中で pass になれば
+  # そこまでの回数 (=2) で確定する。練り直しは1回だけ (RESANITIZE_CALL_FILE=1) 呼ばれる
+  local flag2pass="$tmpdir/flag-then-pass.md" note
+  {
+    echo "---"; echo "id: fp1"; echo "target: $REFLECT_HOME/dotfiles/CLAUDE.md"; echo "created: 2026-07-15"; echo "---"
+    echo ""; echo "## 理由"; echo "元の理由"; echo ""
+    echo "## 変更内容"; echo '```append'; echo "original-content"; echo '```'
+  } >"$flag2pass"
+  SANITIZE_STUB_MODE="flagged pass"; RESANITIZE_STUB_MODE="ok"; reset_stub_call_counts
+  if note=$(stamp_sanitize_if_needed "$flag2pass") \
+    && printf '%s' "$note" | grep -q "sanitized: pass, sanitize_attempts: 2" \
+    && grep -q "^sanitized: pass$" "$flag2pass" \
+    && grep -q "^sanitize_attempts: 2$" "$flag2pass" \
+    && grep -qF "resanitized-content-call-1" "$flag2pass" \
+    && ! grep -qF "original-content" "$flag2pass" \
+    && [ "$(cat "$RESANITIZE_CALL_FILE")" = "1" ]; then
+    ok
+  else
+    ng "stamp_sanitize_if_needed: flagged→練り直し→pass で attempts=2・練り直し後の内容が反映される ($note)"
+  fi
+
+  # --- stamp_sanitize_if_needed: 練り直しループ「3回とも flagged」---
+  # 監査は最大3回・練り直しは最大2回。3回目も flagged なら見送りにはせず、
+  # 最後の (2回練り直した) 内容のまま sanitized: flagged で確定する
+  local flag3="$tmpdir/flag-x3.md"
+  {
+    echo "---"; echo "id: f3"; echo "target: $REFLECT_HOME/dotfiles/CLAUDE.md"; echo "created: 2026-07-15"; echo "---"
+    echo ""; echo "## 理由"; echo "元の理由"; echo ""
+    echo "## 変更内容"; echo '```append'; echo "original-content"; echo '```'
+  } >"$flag3"
+  SANITIZE_STUB_MODE="flagged"; RESANITIZE_STUB_MODE="ok"; reset_stub_call_counts
+  if note=$(stamp_sanitize_if_needed "$flag3") \
+    && printf '%s' "$note" | grep -q "sanitized: flagged .*sanitize_attempts: 3" \
+    && grep -q "^sanitized: flagged" "$flag3" \
+    && grep -q "^sanitize_attempts: 3$" "$flag3" \
+    && grep -qF "resanitized-content-call-2" "$flag3" \
+    && [ "$(cat "$RESANITIZE_CALL_FILE")" = "2" ]; then
+    ok
+  else
+    ng "stamp_sanitize_if_needed: flagged×3 で attempts=3・見送りにせず最後の内容のまま flagged 確定する ($note)"
+  fi
+  SANITIZE_STUB_MODE="pass"; RESANITIZE_STUB_MODE="ok"; reset_stub_call_counts
+
+  # --- stamp_sanitize_if_needed: 練り直し自体が失敗 (PROPOSAL ブロック欠落) すると
+  # 直前の flagged 判定のままその回数でスタンプして打ち切る (見送りにはしない) ---
+  local flagresanifail="$tmpdir/flag-resani-fail.md"
+  {
+    echo "---"; echo "id: frf1"; echo "target: $REFLECT_HOME/dotfiles/CLAUDE.md"; echo "created: 2026-07-15"; echo "---"
+    echo ""; echo "## 変更内容"; echo '```append'; echo "original-content"; echo '```'
+  } >"$flagresanifail"
+  SANITIZE_STUB_MODE="flagged"; RESANITIZE_STUB_MODE="missing-block"; reset_stub_call_counts
+  if note=$(stamp_sanitize_if_needed "$flagresanifail") \
+    && printf '%s' "$note" | grep -q "sanitize_attempts: 1" \
+    && grep -q "^sanitize_attempts: 1$" "$flagresanifail" \
+    && grep -qF "original-content" "$flagresanifail"; then
+    ok
+  else
+    ng "stamp_sanitize_if_needed: 練り直し失敗時に直前の flagged のまま attempts をスタンプして打ち切る ($note)"
+  fi
+  SANITIZE_STUB_MODE="pass"; RESANITIZE_STUB_MODE="ok"; reset_stub_call_counts
 
   # --- process_proposal_block: supersedes 付与 ---
   local blkps out8 id8
@@ -1348,13 +1699,41 @@ EOF
     ng "process_proposal_block: supersedes 付与 ($out8)"
   fi
 
-  # --- build_sanitize_prompt / build_regenerate_prompt (純粋関数の組み立て内容) ---
-  local sp rp
-  sp=$(build_sanitize_prompt "SANITIZE_INPUT_MARKER")
-  if printf '%s' "$sp" | grep -qF "SANITIZE_INPUT_MARKER" && printf '%s' "$sp" | grep -qF "process-retro/SKILL.md"; then
+  # --- extract_change_content_section ---
+  local ecfile="$tmpdir/change-content-mid.md"
+  { echo "---"; echo "title: t"; echo "---"; echo ""; echo "## 理由"; echo "理由本文"; echo ""; \
+    echo "## 変更内容"; echo "変更本文1"; echo "変更本文2"; echo ""; echo "## 備考"; echo "備考本文"; } >"$ecfile"
+  if [ "$(extract_change_content_section "$ecfile")" = "$(printf '## 変更内容\n変更本文1\n変更本文2\n')" ]; then
     ok
   else
-    ng "build_sanitize_prompt: 入力内容と判定基準の出典パスが埋め込まれる"
+    ng "extract_change_content_section: 中間セクションの抽出 ($(extract_change_content_section "$ecfile"))"
+  fi
+
+  local eclast="$tmpdir/change-content-last.md"
+  { echo "---"; echo "title: t"; echo "---"; echo ""; echo "## 理由"; echo "理由本文"; echo ""; \
+    echo "## 変更内容"; echo "変更本文のみ"; } >"$eclast"
+  if [ "$(extract_change_content_section "$eclast")" = "$(printf '## 変更内容\n変更本文のみ\n')" ]; then
+    ok
+  else
+    ng "extract_change_content_section: 最終セクション (EOF まで) の抽出"
+  fi
+
+  local ecnone="$tmpdir/change-content-none.md"
+  { echo "---"; echo "title: t"; echo "---"; echo ""; echo "## 理由"; echo "変更内容セクションなし"; } >"$ecnone"
+  if [ -z "$(extract_change_content_section "$ecnone")" ]; then
+    ok
+  else
+    ng "extract_change_content_section: セクション不在時は空文字"
+  fi
+
+  # --- build_sanitize_prompt / build_regenerate_prompt (純粋関数の組み立て内容) ---
+  local sp rp
+  sp=$(build_sanitize_prompt "TITLE_MARKER" "CHANGE_CONTENT_MARKER")
+  if printf '%s' "$sp" | grep -qF "TITLE_MARKER" && printf '%s' "$sp" | grep -qF "CHANGE_CONTENT_MARKER" \
+    && printf '%s' "$sp" | grep -qF "process-retro/SKILL.md"; then
+    ok
+  else
+    ng "build_sanitize_prompt: title/変更内容と判定基準の出典パスが埋め込まれる"
   fi
   rp=$(build_regenerate_prompt "ORIG_CONTENT_MARKER" "TARGET_CONTENT_MARKER")
   if printf '%s' "$rp" | grep -qF "ORIG_CONTENT_MARKER" && printf '%s' "$rp" | grep -qF "TARGET_CONTENT_MARKER"; then

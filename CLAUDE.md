@@ -61,7 +61,7 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
 
 ## コミット前のサニタイズ
 
-公開リポなので、コミット前に追加・変更差分を `sanitize-auditor` サブエージェントへ点検させ、作業リポ固有情報の漏洩がないか確認する（特に `~/.claude` からの取り込み時）。判定基準は process-retro §3.3(b)。
+公開リポなので、コミット前に追加・変更差分を `sanitize-auditor` サブエージェントへ点検させ、作業リポ固有情報の漏洩がないか確認する（特に `~/.claude` からの取り込み時）。判定基準は [.claude/rules/sanitize-criteria.md](.claude/rules/sanitize-criteria.md)。
 
 ## Claude Code の hook permission
 

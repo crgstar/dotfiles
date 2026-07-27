@@ -160,7 +160,7 @@
       "Bash(bun test:*)",
       "Bash(npm search:*)",
       "Bash(screenshot-capture:*)",
-      "Bash(session-feedback-extract:*)",
+      "Bash(reflect-extract:*)",
       "Bash(auq-web:*)",
       "Bash(*/.claude/skills/*/run.sh*)",
       "Bash(*/.claude/skills/*/scripts/*)",

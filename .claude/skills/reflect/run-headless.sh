@@ -1,22 +1,21 @@
 #!/bin/bash
 # 無人 reflect ドライバ (launchd: com.crgstar.reflect が夜間起動)。
 # queue.jsonl を 1 件ずつ直列処理し、ヘッドレス claude に /reflect --auto を
-# 実行させ、stdout のマーカーをパースして issue 投稿・保留保存・朝サマリ追記を行う。
+# 実行させ、stdout のマーカーをパースして memory 書き込み・提案保存・朝サマリ追記を行う。
 #
 # 権限設計 (outbox パターン): ヘッドレスの claude には書き込み権限を一切与えず、
-# 結果はマーカー付き stdout だけで受け取る。gh api POST・ファイル保存・再送は
-# すべてこのスクリプト (claude の外) が担う。悪性 transcript がモデルを操っても
-# 投稿先・API 形はここに固定されていて変えられない。
+# 結果はマーカー付き stdout だけで受け取る。ファイル保存はすべてこのスクリプト
+# (claude の外) が担う。悪性 transcript がモデルを操っても
+# 書き込み先はここに固定されていて変えられない。
 #
 # 環境変数 (すべて検証用の上書き口。通常は未設定でよい):
 #   REFLECT_STATE_DIR  状態ディレクトリ (default: ~/.local/state/reflect)
 #   REFLECT_CLAUDE_BIN claude 実体 (default: ~/.local/bin/claude)
 #   REFLECT_INBOX      朝サマリの追記先 (default: ~/dotfiles/.local/reflect-inbox.md)
-#   REFLECT_ISSUE_REPO issue 投稿先 (default: crgstar/dotfiles)
 #   REFLECT_MODEL      ヘッドレスのモデル (default: sonnet)
 #   REFLECT_TIMEOUT    claude 1 件あたりの上限秒 (default: 3600)
 #   REFLECT_MIN_GROWTH 差分再処理とみなす最小成長行数 (default: 50。hook と共有)
-#   REFLECT_DRY_RUN    1 なら gh api POST・sanitize監査・再提案のclaude呼び出し・
+#   REFLECT_DRY_RUN    1 なら sanitize監査・再提案のclaude呼び出し・
 #                       実書き込みをせずログに出すだけ
 #   REFLECT_SANITIZE_TIMEOUT   ③ (dotfiles宛) 提案の sanitize 監査 1 件あたりの上限秒
 #                       (default: 300)
@@ -39,12 +38,10 @@ QUEUE="$STATE_DIR/queue.jsonl"
 PROCESSING="$STATE_DIR/processing.jsonl"
 DONE="$STATE_DIR/done"
 HOLD="$STATE_DIR/hold"
-OUTBOX="$STATE_DIR/outbox"
 ATTEMPTS="$STATE_DIR/attempts"
 LOG="$STATE_DIR/run.log"
 INBOX="${REFLECT_INBOX:-$HOME/dotfiles/.local/reflect-inbox.md}"
 CLAUDE_BIN="${REFLECT_CLAUDE_BIN:-$HOME/.local/bin/claude}"
-ISSUE_REPO="${REFLECT_ISSUE_REPO:-crgstar/dotfiles}"
 MODEL="${REFLECT_MODEL:-sonnet}"
 TIMEOUT_SEC="${REFLECT_TIMEOUT:-3600}"
 MIN_GROWTH="${REFLECT_MIN_GROWTH:-50}"
@@ -67,7 +64,7 @@ fi
 # why 単一定義: extract_block と split_blocks (memory/proposal 共通) の状態機械は
 # 同じタグ集合を見ないと「片方だけが開始マーカーを認識する」ずれが起き、引用と
 # 実ブロックの判定が関数間で食い違う。タグ追加時はここだけ変える
-REFLECT_TAGS='OUTBOX|HOLD|SUMMARY|MEMORY|PROPOSAL'
+REFLECT_TAGS='SUMMARY|MEMORY|PROPOSAL'
 # why 2 回で打ち切り: 同じ transcript で毎晩失敗し続けると token を無限に燃やす。
 # 2 回失敗した entry は hold に落として人間判断に回す
 MAX_ATTEMPTS=2
@@ -76,10 +73,10 @@ MAX_ATTEMPTS=2
 # gh (homebrew) や claude (~/.local/bin) が見えない
 export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin"
 
-mkdir -p "$STATE_DIR" "$HOLD" "$OUTBOX" "$(dirname "$INBOX")"
+mkdir -p "$STATE_DIR" "$HOLD" "$(dirname "$INBOX")"
 
-# why stderr 出力: post_issue 等は $(...) で stdout を捕まえられるので、
-# stdout に log を混ぜると戻り値 (issue URL) に混入する
+# why stderr 出力: 一部の関数は $(...) で stdout を捕まえられるので、
+# stdout に log を混ぜると戻り値に混入する
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2; }
 
 trim() { # 先頭・末尾の空白を除いた値を stdout に返す (ヘッダ値の正規化・純粋関数)
@@ -95,8 +92,8 @@ trim() { # 先頭・末尾の空白を除いた値を stdout に返す (ヘッ�
 
 extract_block() { # $1=タグ名 stdin=claude 出力。マーカー行の間だけを出す
   # why 状態機械: ブロック本文に引用された別タグの開始マーカー (SKILL.md の
-  # 例示を含む transcript 等) を新規ブロック開始として拾うと、HOLD に隔離した
-  # 内容の一部を OUTBOX として投稿しうる。「最初に開いたブロックが閉じるまで、
+  # 例示を含む transcript 等) を新規ブロック開始として拾うと、ブロック本文の
+  # 一部を別ブロックとして誤処理しうる。「最初に開いたブロックが閉じるまで、
   # 他の開始マーカーは本文扱い」にして構造を一意にする
   awk -v tag="$1" -v tags="$REFLECT_TAGS" '
     inblk == "" && $0 ~ ("^<<<REFLECT-(" tags ")$") { inblk = substr($0, 4); next }
@@ -462,7 +459,7 @@ build_sanitize_prompt() { # $1=title (frontmatter) $2=変更内容セクショ�
   cat <<'EOF'
 以下は、ローカルで生成された提案のうち、承認されると公開 dotfiles リポにそのまま
 コミットされる内容 (コミットメッセージに載るタイトルと、target ファイルに適用される
-変更内容) です。まず ~/dotfiles/.claude/skills/process-retro/SKILL.md の §3.3(b) を読み、
+変更内容) です。まず ~/dotfiles/.claude/rules/sanitize-criteria.md を読み、
 そこに書かれたサニタイズ判定基準 (絶対パス・組織名/他人の名前・秘密情報・作業リポ固有の
 識別子の混入有無) をそのまま適用してください。
 
@@ -491,7 +488,7 @@ build_resanitize_prompt() { # $1=元提案ファイル全文(frontmatter込み) 
   # 「flag された漏洩要素だけを除去する」)。title/target/kind の意図は維持させたいので
   # そのことを明示し、変更内容以外に手を入れさせない
   cat <<'EOF'
-以下の提案は、サニタイズ監査 (~/dotfiles/.claude/skills/process-retro/SKILL.md の §3.3(b) に
+以下の提案は、サニタイズ監査 (~/dotfiles/.claude/rules/sanitize-criteria.md に
 書かれた判定基準) で flagged と判定されました。指摘された漏洩理由の要素だけを取り除いて
 "## 変更内容" を作り直してください。title / target / kind が表す意図 (何について・どの
 ファイルに対する提案か) は変更しないこと。target の現在の内容も参考にして、適用結果が
@@ -888,25 +885,6 @@ run_regenerate_cycle() { # 引数なし。$REFLECT_PROPOSALS_DIR/pending の sta
   fi
 }
 
-post_issue() { # $1=outbox ファイル (1 行目 "title: ...", 2 行目以降が本文)。成功で issue URL を出力
-  local f="$1" title body_file url rc
-  title=$(head -n1 "$f" | sed 's/^title: //')
-  [ -n "$title" ] || { log "outbox の title が空: $f"; return 1; }
-  if [ "${REFLECT_DRY_RUN:-}" = "1" ]; then
-    log "DRY_RUN: issue 投稿をスキップ ($f: $title)"
-    echo "(dry-run)"
-    return 0
-  fi
-  body_file=$(mktemp "${TMPDIR:-/tmp/}reflect-body-XXXXXX")
-  tail -n +2 "$f" >"$body_file"
-  url=$(gh api --method POST "/repos/$ISSUE_REPO/issues" \
-    -f title="$title" -F body=@"$body_file" --jq .html_url)
-  rc=$?
-  rm -f "$body_file"
-  [ $rc -eq 0 ] && echo "$url"
-  return $rc
-}
-
 inbox_append() { # $1=見出し行 stdin=本文
   {
     echo ""
@@ -949,8 +927,8 @@ mark_done() {
   clear_attempts "$1"
 }
 
-# why ここで定義: self_test (直後) や run_regenerate_cycle は post_issue は
-# 使わないが inbox_append を使う。self-test 起動は exec によるログ差し替えより
+# why ここで定義: self_test (直後) や run_regenerate_cycle は inbox_append を使う。
+# self-test 起動は exec によるログ差し替えより
 # 前で発生するため、呼ばれうる関数はすべてそれより前に定義しておく必要がある
 
 self_test() {
@@ -1730,7 +1708,7 @@ EOF
   local sp rp
   sp=$(build_sanitize_prompt "TITLE_MARKER" "CHANGE_CONTENT_MARKER")
   if printf '%s' "$sp" | grep -qF "TITLE_MARKER" && printf '%s' "$sp" | grep -qF "CHANGE_CONTENT_MARKER" \
-    && printf '%s' "$sp" | grep -qF "process-retro/SKILL.md"; then
+    && printf '%s' "$sp" | grep -qF "rules/sanitize-criteria.md"; then
     ok
   else
     ng "build_sanitize_prompt: title/変更内容と判定基準の出典パスが埋め込まれる"
@@ -1891,7 +1869,7 @@ exec >>"$LOG" 2>&1
 # 手動即時実行とも共用する。決定13a)。
 # why PID 生存判定: 経過時間だけで stale と断ずると、claude のハング等で
 # 長時間残っている「生きた」ドライバから lock を奪い、同じ queue を
-# 二重処理して issue を重複投稿してしまう
+# 二重処理して memory・提案を重複保存してしまう
 LOCK="$STATE_DIR/lock"
 if [ -d "$LOCK" ]; then
   lock_pid=$(cat "$LOCK/pid" 2>/dev/null || true)
@@ -1933,7 +1911,7 @@ fi
 echo $$ >"$LOCK/pid"
 trap 'rm -rf "$LOCK" 2>/dev/null' EXIT
 
-log "=== run 開始 (model=$MODEL repo=$ISSUE_REPO dry_run=${REFLECT_DRY_RUN:-0} regen_only=$REGEN_ONLY) ==="
+log "=== run 開始 (model=$MODEL dry_run=${REFLECT_DRY_RUN:-0} regen_only=$REGEN_ONLY) ==="
 
 # 再提案サイクル (決定13/13a): 通常runはqueue処理の前に、--regenerate-onlyはこれだけ
 # 実行して終了する
@@ -1944,19 +1922,7 @@ if [ "$REGEN_ONLY" -eq 1 ]; then
   exit 0
 fi
 
-# 1) 前回投稿に失敗した outbox の再送
-for f in "$OUTBOX"/*.md; do
-  [ -f "$f" ] || continue
-  if url=$(post_issue "$f"); then
-    log "outbox 再送成功: $f -> $url"
-    inbox_append "$(date '+%Y-%m-%d') 再送 $(basename "$f" .md)" <<<"issue: $url"
-    rm -f "$f"
-  else
-    log "outbox 再送失敗 (次回また試す): $f"
-  fi
-done
-
-# 2) queue を processing に切り出して直列処理。
+# queue を processing に切り出して直列処理。
 # why rename 方式: 処理中も SessionEnd hook は queue へ append し続ける。
 # 「読み終わってから圧縮結果を mv で書き戻す」方式は読了〜mv の間の append を
 # 黙って消す race があるため、先に queue 自体を atomic rename で切り出し、
@@ -2063,34 +2029,6 @@ else
       continue
     fi
 
-    status_line=""
-    hold_block=$(extract_block HOLD <<<"$out")
-    outbox_block=$(extract_block OUTBOX <<<"$out")
-    if [ -n "$hold_block" ]; then
-      # §6 の契約で HOLD と OUTBOX は排他。両方来たら全体を保留に倒す
-      # (監査で止めた内容の取りこぼし投稿を防ぐ)
-      {
-        printf '%s\n' "$hold_block"
-        if [ -n "$outbox_block" ]; then
-          printf '\n--- 同時に返された OUTBOX (契約違反のため投稿していない) ---\n%s\n' "$outbox_block"
-        fi
-      } >"$HOLD/$sid.md"
-      log "$sid: 監査保留 -> hold/$sid.md"
-      status_line="監査保留: hold/$sid.md"
-    elif [ -n "$outbox_block" ]; then
-      printf '%s\n' "$outbox_block" >"$OUTBOX/$sid.md"
-      if url=$(post_issue "$OUTBOX/$sid.md"); then
-        log "$sid: issue 投稿成功 -> $url"
-        rm -f "$OUTBOX/$sid.md"
-        status_line="issue: $url"
-      else
-        log "$sid: issue 投稿失敗。outbox に保持し次回再送"
-        status_line="issue 投稿失敗 (outbox 再送待ち)"
-      fi
-    fi
-
-    # memory ブロックは HOLD/OUTBOX の有無と独立に処理する (A の漏洩ガードと
-    # B のローカル書き込みは blast radius が別物)
     mem_result=""
     mem_dir=$(mktemp -d "${TMPDIR:-/tmp/}reflect-mem-XXXXXX")
     split_memory_blocks "$mem_dir" <<<"$out"
@@ -2103,8 +2041,6 @@ else
     done
     rm -rf "$mem_dir"
 
-    # proposal ブロックも HOLD/OUTBOX の有無と独立に処理する (設計書 §3.4:
-    # B はローカル副作用のみで blast radius が別物。memory と同じ位置で処理する)
     prop_result=""
     prop_dir=$(mktemp -d "${TMPDIR:-/tmp/}reflect-prop-XXXXXX")
     split_proposal_blocks "$prop_dir" <<<"$out"
@@ -2129,7 +2065,6 @@ else
 
     {
       printf '%s\n' "$summary"
-      [ -n "$status_line" ] && printf '\n%s\n' "$status_line"
       [ -n "$mem_result" ] && printf '\n%s' "$mem_result"
       [ -n "$prop_result" ] && printf '\n%s' "$prop_result"
     } | inbox_append "$(date '+%Y-%m-%d') $sid ($cwd)"

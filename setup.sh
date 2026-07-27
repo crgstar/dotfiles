@@ -229,10 +229,10 @@ for script in "$DOTFILES_DIR/bin/"*; do
 done
 shopt -u nullglob
 
-# why: スキル本文から "session-feedback-extract" の短縮名で呼べるようにし、
-#      Bash(session-feedback-extract:*) の allow ルールだけで権限ダイアログを抑える
-link_file "$DOTFILES_DIR/.claude/skills/session-feedback/extract.sh" \
-          "$HOME/.local/bin/session-feedback-extract"
+# why: スキル本文から "reflect-extract" の短縮名で呼べるようにし、
+#      Bash(reflect-extract:*) の allow ルールだけで権限ダイアログを抑える
+link_file "$DOTFILES_DIR/.claude/skills/reflect/extract/reflect-extract.mjs" \
+          "$HOME/.local/bin/reflect-extract"
 
 # ----- Git -----
 
@@ -345,16 +345,8 @@ link_file "$DOTFILES_DIR/.claude/FABLE.md" \
 
 link_file "$DOTFILES_DIR/.claude/skills/docbase-mermaid/SKILL.md" \
           "$HOME/.claude/skills/docbase-mermaid/SKILL.md"
-link_file "$DOTFILES_DIR/.claude/skills/session-feedback/SKILL.md" \
-          "$HOME/.claude/skills/session-feedback/SKILL.md"
-link_file "$DOTFILES_DIR/.claude/skills/retro/SKILL.md" \
-          "$HOME/.claude/skills/retro/SKILL.md"
 link_file "$DOTFILES_DIR/.claude/skills/reflect/SKILL.md" \
           "$HOME/.claude/skills/reflect/SKILL.md"
-link_file "$DOTFILES_DIR/.claude/skills/process-retro/SKILL.md" \
-          "$HOME/.claude/skills/process-retro/SKILL.md"
-link_file "$DOTFILES_DIR/.claude/skills/process-retro/references/summary-template.md" \
-          "$HOME/.claude/skills/process-retro/references/summary-template.md"
 # why: スキルが委譲する専用サブエージェント。生ログ隔離 (retro-extractor)・漏洩監査
 #      (sanitize-auditor)・HTML ドキュメントレビュー (doc-reviewer)・SKILL.md 書き味レビュー
 #      (skill-md-reviewer) を tools 制限付きで担う。user スコープ (~/.claude/agents) に置く。

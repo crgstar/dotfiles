@@ -153,14 +153,47 @@ split_segments() {
 #   残り、`echo *` 等の safe prefix にマッチして素通りしてしまう。
 #   例: `gh api foo & rm -rf ~` は 1 セグメントで `gh api ` 始まり扱いになる。
 #   これらを含むセグメントは prefix が何であれ unsafe に倒す（構造の白名簿化）。
+# 位置 $2 から `2>&1` が単語として始まっているかを判定する(純粋関数)。
+# 0: 該当 / 1: 非該当
+#
+# why 単語境界を要求する: 境界を見ないと `12>&1`(fd 12 の複製) の途中から
+# 4 文字を消して先頭の `1` だけを残すような、実 bash の解釈とズレた読み方に
+# なる。前後が空白か端であることを確かめてから読み飛ばす。
+_is_word_bounded_2gt1() {
+  local s="$1" i="$2" len="$3" prev next
+  [ "${s:$i:4}" = '2>&1' ] || return 1
+  if [ "$i" -gt 0 ]; then
+    prev="${s:$((i-1)):1}"
+    case "$prev" in ' '|$'\t') ;; *) return 1 ;; esac
+  fi
+  if [ $((i+4)) -lt "$len" ]; then
+    next="${s:$((i+4)):1}"
+    case "$next" in ' '|$'\t') ;; *) return 1 ;; esac
+  fi
+  return 0
+}
+
 # ' " ` のクォートは尊重するが、ダブルクォート内でも $ と ` は展開されるため危険とみなす。
 # gh api の /tmp リダイレクト例外は、呼び出し側が > を剥がしてからこの関数に渡す。
+#
+# 例外: 単語として現れる `2>&1` だけは読み飛ばす。fd 2 を fd 1 に複製するだけで
+#   ファイル書き込みもコマンド実行も伴わないうえ、`gh api ... 2>&1 | head` の形で
+#   多用するため。単語境界を要求するので `&>file`（全出力をファイルへ）や
+#   `2>file` は従来通り検出される。読み飛ばすのは 4 文字ちょうどなので、
+#   `2>&1 & rm -rf ~` のように後続に別のメタ文字が続く形も取りこぼさない。
 has_unsafe_metachar() {
   local s="$1"
   local i=0 len=${#s} ch
   local in_single=0 in_double=0 bs_run=0
   while [ "$i" -lt "$len" ]; do
     ch="${s:$i:1}"
+    # why `$ch` = 2 を先に見る: この関数は 1 文字ずつ全体を走査するので、
+    # 数千文字の GraphQL クエリでは関数呼び出しがそのまま本数になる。
+    if [ "$ch" = '2' ] && [ "$in_single" = 0 ] && [ "$in_double" = 0 ] \
+       && _is_word_bounded_2gt1 "$s" "$i" "$len"; then
+      i=$((i+4))
+      continue
+    fi
     if [ "$in_single" = 1 ]; then
       [ "$ch" = "'" ] && in_single=0
     elif [ "$in_double" = 1 ]; then
@@ -451,6 +484,17 @@ run_self_test() {
   assert_safe 'gh api --jq 付き > /tmp 保存' "gh api repos/foo/bar/pulls/1 --jq '.title' > /tmp/title.txt"
   assert_safe 'gh api > /tmp サブディレクトリ' 'gh api repos/foo/bar/pulls/1 > /tmp/sub/dir/out.json'
 
+  # 2>&1 は fd 複製で副作用が無いため、単語として現れる限り読み飛ばす
+  assert_safe '2>&1 単体' 'gh api repos/foo/bar/pulls/1 2>&1'
+  assert_safe '2>&1 | head' 'gh api repos/foo/bar/pulls/1 2>&1 | head -c 2000'
+  assert_safe '2>&1 が gh api 以外のセグメントに付く' 'echo start 2>&1 && gh api repos/foo/bar/pulls/1'
+  assert_unsafe '2>&1 の後に & が続く' 'gh api repos/foo/bar/pulls/1 2>&1 & rm -rf /tmp/x'
+  assert_unsafe '2>&1 とファイル書き込みの併用' 'gh api repos/foo/bar/pulls/1 2>&1 > /home/user/.zshrc'
+  assert_unsafe '&> は全出力のファイル書き込み' 'gh api repos/foo/bar/pulls/1 &> /tmp/x'
+  assert_unsafe '2>file は読み飛ばさない' 'gh api repos/foo/bar/pulls/1 2>/dev/null'
+  assert_unsafe '>&1 (2 が無い形) は読み飛ばさない' 'gh api repos/foo/bar/pulls/1 >&1'
+  assert_unsafe '12>&1 は単語境界を満たさない' 'gh api repos/foo/bar/pulls/1 12>&1'
+
   # gh api graphql: mutation を含まない参照クエリは -f query=... 付きでも allow
   assert_safe 'graphql introspection' "gh api graphql -f query='query { __type(name: \"ProjectV2SingleSelectField\") { fields { name type { name kind ofType { name } } } } }'"
   assert_safe 'graphql 複数エイリアス' "gh api graphql -f query='query { a:__type(name: \"A\") { fields { name } } b:__type(name: \"B\") { inputFields { name } } }'"
@@ -465,6 +509,7 @@ run_self_test() {
   '"
   assert_safe 'graphql > /tmp 保存' "gh api graphql -f query='{ viewer { login } }' > /tmp/out.json"
   assert_safe 'graphql --jq 付き' "gh api graphql -f query='{ viewer { login } }' --jq '.data'"
+  assert_safe 'graphql 2>&1 | head' "gh api graphql -f query='{ viewer { login } }' 2>&1 | head -c 2000"
 
   assert_unsafe 'graphql mutation' "gh api graphql -f query='mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }'"
   assert_unsafe 'graphql mutation (連結形 -fquery=)' "gh api graphql -fquery='mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }'"

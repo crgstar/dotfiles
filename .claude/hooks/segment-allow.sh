@@ -64,8 +64,13 @@ trim() {
 }
 
 # クォート（' " `）を尊重しつつ &&, ||, ;, | で分割する。
-# trim 済み・空文字を除いたセグメントを 1 行ずつ stdout に出す。
+# trim 済み・空文字を除いたセグメントを NUL 区切りで stdout に出す。
 # クォート内の演算子は分割されない。
+#
+# Why NUL 区切り: セグメント自身が改行を含みうる（`-f query='<改行>...'` の
+# ような複数行クォート引数）。改行区切りで返すと呼び出し側の `read -r` が
+# 1 セグメントを複数セグメントに割ってしまい、クエリ本文の断片が
+# 「safe-prefix に無いコマンド」と誤判定されて allow が落ちる。
 split_segments() {
   local cmd="$1"
   local i=0 len=${#cmd} ch next
@@ -77,7 +82,7 @@ split_segments() {
   _emit() {
     local t
     t="$(trim "$seg")"
-    [ -n "$t" ] && printf '%s\n' "$t"
+    [ -n "$t" ] && printf '%s\0' "$t"
     seg=""
   }
 
@@ -182,6 +187,70 @@ has_unsafe_metachar() {
   return 1
 }
 
+# `gh api graphql` セグメント（trim 済み前提）が read-only と確認できるか判定する。
+# 0: safe / 1: not safe
+#
+# Why 専用判定: GraphQL は参照クエリでも本文を `-f query=...` で渡す必要があり、
+#   汎用の書き込みフラグ判定（-f/-F を一律 write とみなす）だと introspection の
+#   ような純粋な参照まで必ず ask に落ちる。
+# Why `mutation` 文字列を軸にする: GraphQL の書き込みは mutation operation でしか
+#   起こせず、mutation は必ず `mutation` キーワードを伴う（キーワード省略の
+#   shorthand `{...}` は spec 上 query 固定）。よって「セグメントのどこにも
+#   mutation が現れない」と言えれば、そのリクエストは読み取りに限られる。
+#   エイリアスやフラグメント経由で mutation を呼ぶ抜け道は GraphQL には無い。
+# 値が読めない形（--input / -F の @file・@-）は「mutation が無い」を証明できないので
+# 一律 unsafe。--method も GraphQL では不要なうえ判定面を増やすだけなので弾く。
+is_safe_gh_graphql() {
+  local seg="$1"
+  local t v pending=0
+
+  # why トークン分割前に全体を見る: 複数行クエリはトークン内の改行で
+  # tokenize_quoted の出力が複数行に割れ、2 行目以降が「フラグでもフラグの値でもない
+  # トークン」として素通りする。`-f query='<改行>mutation {...}'` で検査をすり抜ける
+  # ため、mutation 判定はトークン化に依存させない。
+  # 大小文字無視で弾くので `__type(name:"Mutation")` のような参照も落ちるが、
+  # false positive は ask に落ちるだけで実害が無い。
+  case "$seg" in
+    *[Mm][Uu][Tt][Aa][Tt][Ii][Oo][Nn]*) return 1 ;;
+  esac
+
+  while IFS= read -r t; do
+    if [ "$pending" = 1 ]; then
+      pending=0
+      _gh_graphql_value_ok "$t" || return 1
+      continue
+    fi
+    case "$t" in
+      -X*|--method*|--input*) return 1 ;;
+      -f|-F|--field|--raw-field) pending=1 ;;
+      --field=*)     v="${t#--field=}";     _gh_graphql_value_ok "$v" || return 1 ;;
+      --raw-field=*) v="${t#--raw-field=}"; _gh_graphql_value_ok "$v" || return 1 ;;
+      -f?*|-F?*)     v="${t#-?}";           _gh_graphql_value_ok "$v" || return 1 ;;
+    esac
+  done < <(tokenize_quoted "$seg")
+
+  # 末尾がフラグだけで値が続かない形は解釈できないので unsafe に倒す。
+  [ "$pending" = 0 ]
+}
+
+# `key=value` 形式のフィールド指定が検査可能な値かを判定する。
+# 0: ok / 1: not ok
+_gh_graphql_value_ok() {
+  local kv="$1" val
+  # gh のフィールド指定は必ず key=value 形式（gh api --help）。そうでない値は
+  # フラグの取り違え（`-f -X POST` のように次のフラグを値として食う形）を意味し、
+  # 何が送られるか読めないので解釈不能として弾く。
+  case "$kv" in
+    *=*) val="${kv#*=}" ;;
+    *)   return 1 ;;
+  esac
+  # -F は値が @ で始まるとファイル / stdin から読み込む（gh api --help）。中身を
+  # 検査できないので弾く。-f は @ を展開しないが、区別せず落とした方が判定が
+  # 単純で、`-f key=@x` を実際に使う場面も無い。
+  case "$val" in '@'*) return 1 ;; esac
+  return 0
+}
+
 # 単一セグメント（trim 済み前提）が safe-prefix に該当するか判定する。
 # 0: safe / 1: not safe
 is_safe_segment() {
@@ -229,6 +298,11 @@ is_safe_segment() {
   #   -F* / --field*     : typed パラメータ（同上）
   #   --input*           : リクエストボディ
   case "$seg" in
+    # graphql エンドポイントだけは -f query=... が参照でも必須なので別判定に回す。
+    'gh api graphql'|'gh api graphql '*)
+      is_safe_gh_graphql "$seg" && return 0
+      return 1
+      ;;
     'gh api '*)
       local t
       while IFS= read -r t; do
@@ -267,7 +341,7 @@ evaluate_command() {
     load_safe_prefixes
   fi
 
-  while IFS= read -r seg; do
+  while IFS= read -r -d '' seg; do
     if ! is_safe_segment "$seg"; then
       return 1
     fi
@@ -280,7 +354,7 @@ evaluate_command() {
 }
 
 emit_allow() {
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","message":"compound read-only: gh api (no write flags) + segments in safe-prefix list"}}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","message":"compound read-only: gh api (no write flags; graphql without mutation) + segments in safe-prefix list"}}}'
 }
 
 emit_passthrough() {
@@ -377,6 +451,39 @@ run_self_test() {
   assert_safe 'gh api --jq 付き > /tmp 保存' "gh api repos/foo/bar/pulls/1 --jq '.title' > /tmp/title.txt"
   assert_safe 'gh api > /tmp サブディレクトリ' 'gh api repos/foo/bar/pulls/1 > /tmp/sub/dir/out.json'
 
+  # gh api graphql: mutation を含まない参照クエリは -f query=... 付きでも allow
+  assert_safe 'graphql introspection' "gh api graphql -f query='query { __type(name: \"ProjectV2SingleSelectField\") { fields { name type { name kind ofType { name } } } } }'"
+  assert_safe 'graphql 複数エイリアス' "gh api graphql -f query='query { a:__type(name: \"A\") { fields { name } } b:__type(name: \"B\") { inputFields { name } } }'"
+  assert_safe 'graphql shorthand (query キーワード省略)' "gh api graphql -f query='{ viewer { login } }'"
+  assert_safe 'graphql 変数付き' "gh api graphql -F owner=cli -F name=cli -f query='query(\$owner: String!, \$name: String!) { repository(owner: \$owner, name: \$name) { id } }'"
+  assert_safe 'graphql --paginate --slurp' "gh api graphql --paginate --slurp -f query='query(\$endCursor: String) { viewer { repositories(first: 100, after: \$endCursor) { nodes { id } } } }'"
+  assert_safe 'graphql | jq' "gh api graphql -f query='{ viewer { login } }' | jq -r '.data.viewer.login'"
+  assert_safe 'graphql 複数行クエリ' "gh api graphql -f query='
+    query {
+      viewer { login }
+    }
+  '"
+  assert_safe 'graphql > /tmp 保存' "gh api graphql -f query='{ viewer { login } }' > /tmp/out.json"
+  assert_safe 'graphql --jq 付き' "gh api graphql -f query='{ viewer { login } }' --jq '.data'"
+
+  assert_unsafe 'graphql mutation' "gh api graphql -f query='mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }'"
+  assert_unsafe 'graphql mutation (連結形 -fquery=)' "gh api graphql -fquery='mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }'"
+  assert_unsafe 'graphql mutation (--field= 形)' "gh api graphql --field=query='mutation { deleteIssue(input: {issueId: \"x\"}) { clientMutationId } }'"
+  assert_unsafe 'graphql mutation (大文字混じり)' "gh api graphql -f query='Mutation { addStar(input: {starrableId: \"x\"}) { id } }'"
+  # 複数行の 2 行目以降に mutation を隠す形（トークン分割任せだと素通りする穴）
+  assert_unsafe 'graphql mutation (複数行の 2 行目)' "gh api graphql -f query='
+    mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }
+  '"
+  assert_unsafe 'graphql -f query=@file (中身を検査できない)' 'gh api graphql -f query=@q.graphql'
+  assert_unsafe 'graphql -F query=@- (stdin)' 'gh api graphql -F query=@-'
+  assert_unsafe 'graphql --input (ボディ丸ごと)' 'gh api graphql --input body.json'
+  assert_unsafe 'graphql -X POST' "gh api graphql -X POST -f query='{ viewer { login } }'"
+  assert_unsafe 'graphql -f に値が続かない' 'gh api graphql -f'
+  assert_unsafe 'graphql -f が次のフラグを値として食う' "gh api graphql -f -X POST"
+  assert_unsafe 'graphql -f の値が key=value でない' "gh api graphql -f notakeyvalue"
+  assert_unsafe 'graphql とクォート外コマンド置換' 'gh api graphql -f query=$(cat q.graphql)'
+  assert_unsafe 'graphql と rm の併記' "gh api graphql -f query='{ viewer { login } }' && rm -rf /tmp/x"
+
   # escalate-unsafe-bash.sh 側が ask に格上げする危険形が gh api と併記されても
   # 素通ししないか (finding #1: PermissionRequest が escalate の ask を再び緩めていた)
   assert_unsafe 'find -exec と gh api の併記' 'find . -exec rm {} \; && gh api repos/foo/bar/pulls/1'
@@ -428,7 +535,8 @@ run_self_test() {
   assert_split_count() {
     local label="$1" cmd="$2" expected="$3"
     local got
-    got="$(split_segments "$cmd" | wc -l | tr -d ' ')"
+    # NUL 区切り出力なので NUL の個数を数える
+    got="$(split_segments "$cmd" | tr -cd '\0' | wc -c | tr -d ' ')"
     if [ "$got" = "$expected" ]; then
       printf 'ok  : %s\n' "$label"
     else

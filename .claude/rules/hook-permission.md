@@ -50,6 +50,8 @@ safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` 
 - `Bash(cmd sub *)` / `Bash(cmd sub:*)` → 多語サブコマンドにも対応 (`git status *` / `gh pr view *` 等)
 - 除外: 内部に `*` や `/` を含む複合パターン (`git -C * status *`, `xargs -n* ls *`, `cat */.mirugit/*`) — bash glob として 1 セグメント照合できないので hook の責務外
 - `gh api` だけは hook 側で書き込みフラグの有無を判定する特別扱い（静的 allow には載せない）。argv をトークン分割し `-X* / --method* / -f* / -F* / --field* / --raw-field* / --input*` のどの prefix も含まないと確認できたときだけ safe とする（long form `--field` や連結形 `-XDELETE` / `-Ftitle=x` を正規表現では取りこぼすため、prefix 判定に倒している）
+- `gh api graphql` はさらに別扱い。参照クエリでも本文を `-f query=...` で渡すので上のフラグ判定では必ず ask に落ちるため、「セグメント全体に `mutation` が現れない」ことを条件に safe とする（GraphQL の書き込みは mutation operation 限定で、キーワード省略の shorthand `{...}` は spec 上 query 固定なので、この 1 語で読み書きを判別できる）。値を検査できない `--input` / `-F key=@file` / `-F key=@-` と、判定面を増やす `--method` は引き続き unsafe。`__type(name:"Mutation")` のような参照も巻き添えで ask になるが、false positive は安全側なので許容する
+- `split_segments` は NUL 区切りで返す。`-f query='<改行>...'` のようにセグメント自身が改行を含むケースがあり、改行区切りだと呼び出し側の `read -r` が 1 セグメントを分割してクエリ本文の断片を「未知のコマンド」と誤判定するため
 - さらに全セグメント共通で、クォート外に `& $ \` ( ) < >`・改行が現れたら prefix が何であれ unsafe に倒す（`&`・`$()`・バッククォート・リダイレクト等は末尾 glob の prefix 照合をすり抜けるため）。例外として `gh api ... > /tmp/...` への保存だけは許可（実運用で多用するため。リダイレクト先が /tmp 配下リテラルのときのみ）
 
 ### メンテ手順

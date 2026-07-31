@@ -27,7 +27,7 @@
       }
     ]
   },
-  "model": "sonnet",
+  "model": "opus",
   "askUserQuestionTimeout": "never",
-  "effortLevel": "medium"
+  "effortLevel": "high"
 }

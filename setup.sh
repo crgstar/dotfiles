@@ -471,6 +471,8 @@ link_file "$DOTFILES_DIR/.claude/hooks/mcp-error-toolsearch.sh" \
           "$HOME/.claude/hooks/mcp-error-toolsearch.sh"
 link_file "$DOTFILES_DIR/.claude/hooks/escalate-unsafe-bash.sh" \
           "$HOME/.claude/hooks/escalate-unsafe-bash.sh"
+link_file "$DOTFILES_DIR/.claude/hooks/scratchpad-rm-allow.sh" \
+          "$HOME/.claude/hooks/scratchpad-rm-allow.sh"
 
 # ----- reflect 無人実行 (SessionEnd enqueue + launchd 夜間ドライバ) -----
 

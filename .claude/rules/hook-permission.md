@@ -17,7 +17,9 @@ hook を新規追加・改修するとき、`permissions.allow` を触るとき�
 ## 典型パターン
 
 - 「デフォ allow + 危険なパターンだけ hook で ask/deny 格上げ」→ PreToolUse（実例: `escalate-unsafe-bash.sh`。`find -exec`/`-delete`・非 localhost 宛て `curl`・dotfiles 外の skills スクリプト実行を ask に格上げ。`--self-test` あり）
-- 「デフォ ask + 安全なパターンだけ hook で allow に素通し」→ PermissionRequest（実例: `segment-allow.sh`）
+- 「デフォ ask + 安全なパターンだけ hook で allow に素通し」→ PermissionRequest（実例: `segment-allow.sh` / `scratchpad-rm-allow.sh`）
+
+hook handler には `if` フィールドで permission rule 構文の絞り込みを書ける（`"if": "Bash(rm *)"`）。1 handler に 1 ルールだけで `&&`/リスト構文は無い（複数条件は handler を分ける）。マッチしないときはプロセスを起動しないので、同じ matcher に用途別の handler を並べてよい。ただしコマンドがパースできないと fail open（`if` を無視して起動）するため、hook 側の判定は `if` に依存せず単独で完結させる。
 
 ## 応答 JSON の形式（はまりポイント）
 
@@ -60,3 +62,19 @@ safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` 
 
 - 新たに `gh api ... | <cmd> ...` を素通ししたい → `Bash(<cmd> *)` を allow に追加 → `./setup.sh <env>` で prefix 再生成
 - hook ロジック側の self-test: `bash .claude/hooks/segment-allow.sh --self-test`
+
+## scratchpad-rm-allow.sh の許可条件
+
+`Bash(rm *)` は `settings.local/common.json` の `permissions.ask` にあり、union される ask は allow で消せない。scratchpad（`/private/tmp/claude-<uid>/<project-slug>/<session-id>/scratchpad`）配下の一時ファイル削除だけを人間ゲート無しで通すため、PermissionRequest hook (`.claude/hooks/scratchpad-rm-allow.sh`) が下記すべてを満たすときだけ allow を返す。1 つでも欠けたら `{}` を返して静的 ask に委ねる。
+
+- コマンド全体が文字白名簿 `[A-Za-z0-9_./*?,+=:@ -]` のみ。クォート・`$`・バッククォート・`&&`/`;`/`|`/`&`・リダイレクト・改行・`~` はこの 1 本で落ちる（複合コマンドも同時に排除されるので、segment-allow.sh のような分割・トークナイズを持たずに済む）
+- 入力 JSON の `tool_name` が `Bash`（`if` はコマンドをパース不能なとき fail open するので hook 側でも確かめる）
+- 先頭トークンが素の `rm`（`command rm` / `/bin/rm` / `sudo rm` は対象外）
+- フラグは `-[rRfvdi]+` の連結短縮形と `--` のみ。未知フラグがあれば ask
+- 全オペランドが `^/private/tmp/claude-<実行ユーザの uid>/[^/]+/<hook 入力の session_id>/scratchpad/[^/].*` にマッチ。相対パスは cwd を確定できないので対象外
+- パス成分がドットで始まらない（`..` はもちろん `.?` / `.*` も拒否。白名簿が `.` `?` `*` を通すので、リテラルの `..` が無くても展開時に `../..` になり prefix 照合をすり抜ける。`.` 始まりの成分は `?` / `*` にマッチしないため、`/.` を封じれば展開後も scratchpad 内に閉じる。bash 5.2+ の globskipdots や zsh は `..` を展開しないが、macOS 同梱の `/bin/bash` 3.2 は展開するのでシェル任せにしない）
+- scratchpad ルート自体は対象外（`/[^/].*` を要求）。ルートが消えると以降の一時ファイル書き込みが軒並み失敗するため
+
+`session_id` を実パスに埋めるので、並行して動く別セッションや別 uid の scratchpad は allow されない。scratchpad のパス規約が将来変わっても照合が外れて ask に落ちるだけで、安全側に倒れる。
+
+self-test: `bash .claude/hooks/scratchpad-rm-allow.sh --self-test`

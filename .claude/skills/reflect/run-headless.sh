@@ -755,8 +755,27 @@ process_proposal_block() { # $1=blockfile $2=sid $3=n $4=cwd $5=supersedes(省�
   return 0
 }
 
+decode_note_value() { # $1=frontmatter の note 生値。デコード済み note を stdout に返す (純粋関数)
+  # why デコードする: 提案ビューアの note 入力は複数行可の textarea で、frontmatter には
+  # json.dumps 形式の 1 行 ("...\n...") として書かれる。生のまま再掲すると複数行の指摘が
+  # \n リテラルで 1 行に潰れて読みにくく、note を効かせるという再掲の目的を損なう。
+  # why perl: alarm による timeout で既に依存済みで、JSON::PP は Perl 5.14+ のコアモジュール。
+  # 依存を増やさずに済む。デコードに失敗したら生値をそのまま返す (プロンプトから note が
+  # 消えるより、読みにくくても残る方がまし)。
+  local raw="$1"
+  case "$raw" in
+    '"'*) ;;
+    *) printf '%s' "$raw"; return ;;  # 素の文字列 (引用符なし) はそのまま
+  esac
+  printf '%s' "$raw" | perl -MJSON::PP -e '
+    my $in = do { local $/; <STDIN> };
+    my $out = eval { JSON::PP->new->allow_nonref->decode($in) };
+    print defined($out) ? $out : $in;
+  ' 2>/dev/null || printf '%s' "$raw"
+}
+
 build_regenerate_prompt() { # $1=元提案ファイル全文(frontmatter込み) $2=targetの現在の内容
-  # stdout=ヘッドレスへの再生成プロンプト (純粋関数)
+  # $3=デコード済み note (空可)。stdout=ヘッドレスへの再生成プロンプト (純粋関数)
   cat <<'EOF'
 /reflect の再提案 (regenerate) モードとして動いてください。SKILL.md の
 「§6a. 再提案 (regenerate) モード」に書かれたルールに従い、次の元提案と target の
@@ -770,6 +789,23 @@ EOF
 ----- target の現在の内容 -----
 EOF
   printf '%s\n' "$2"
+  # why note を独立セクションで再掲する: note は元提案 frontmatter に既に含まれているが、
+  # 多数の frontmatter キーに埋もれると「作り直しを要求した理由」として扱われず、実測では
+  # 同じ note を渡した 6 件のうち 5 件が note に一切触れずに作り直していた。プロンプト末尾に
+  # 独立セクションで再掲し、最優先の制約であることを明示して直近性を効かせる。
+  # why 空なら省略する: 空セクションは「指摘なし」を「指摘欄がある」ノイズに変えるだけ。
+  if [ -n "$3" ]; then
+    cat <<'EOF'
+----- ユーザの指摘 (note。再提案を要求した本人が書いたもの) -----
+EOF
+    printf '%s\n' "$3"
+    cat <<'EOF'
+
+この note は最優先の制約です。作り直した変更内容がこの指摘に反するなら提案として
+成立しないので、指摘を満たす形に作り直してください。指摘をどう反映したかは
+「## 理由」に 1 行書いてください。
+EOF
+  fi
   echo "----- (以上) -----"
 }
 
@@ -808,7 +844,7 @@ finalize_regenerate_source() { # $1=元提案ファイル $2=archivedディレ�
 process_regenerate_item() { # $1=status:regenerateの提案ファイル。1件を再提案処理し
   # 結果行を stdout に返す (成否は戻り値)。失敗時は決定13aどおり元提案を
   # status: regenerate のまま pending に残す (ロールバックする副作用がないため)
-  local file="$1" proposals_dir archdir old_id old_target orig_content target_content
+  local file="$1" proposals_dir archdir old_id old_target orig_content target_content note
   local prompt raw block tmp_block sid save_out new_id
 
   proposals_dir="${REFLECT_PROPOSALS_DIR:-$HOME/dotfiles/.local/reflect-proposals}"
@@ -816,6 +852,7 @@ process_regenerate_item() { # $1=status:regenerateの提案ファイル。1件�
   old_id=$(basename "$file" .md)
   old_target=$(frontmatter_value "$file" target)
   orig_content=$(cat "$file")
+  note=$(decode_note_value "$(frontmatter_value "$file" note)")
 
   if [ -n "$old_target" ] && [ -f "$old_target" ]; then
     target_content=$(cat "$old_target")
@@ -829,7 +866,7 @@ process_regenerate_item() { # $1=status:regenerateの提案ファイル。1件�
     return 0
   fi
 
-  prompt=$(build_regenerate_prompt "$orig_content" "$target_content")
+  prompt=$(build_regenerate_prompt "$orig_content" "$target_content" "$note")
   raw=$(invoke_regenerate_claude "$prompt")
   block=$(printf '%s\n' "$raw" | extract_block PROPOSAL)
 
@@ -1713,11 +1750,63 @@ EOF
   else
     ng "build_sanitize_prompt: title/変更内容と判定基準の出典パスが埋め込まれる"
   fi
-  rp=$(build_regenerate_prompt "ORIG_CONTENT_MARKER" "TARGET_CONTENT_MARKER")
+  rp=$(build_regenerate_prompt "ORIG_CONTENT_MARKER" "TARGET_CONTENT_MARKER" "")
   if printf '%s' "$rp" | grep -qF "ORIG_CONTENT_MARKER" && printf '%s' "$rp" | grep -qF "TARGET_CONTENT_MARKER"; then
     ok
   else
     ng "build_regenerate_prompt: 元提案と target 現在内容が両方埋め込まれる"
+  fi
+  # note が空のときは指摘セクション自体を出さない (空欄をわざわざ見せない)
+  if printf '%s' "$rp" | grep -qF "ユーザの指摘"; then
+    ng "build_regenerate_prompt: note が空なら指摘セクションを出さない"
+  else
+    ok
+  fi
+  rp=$(build_regenerate_prompt "ORIG" "TARGET" "NOTE_MARKER")
+  if printf '%s' "$rp" | grep -qF "NOTE_MARKER" \
+    && printf '%s' "$rp" | grep -qF "ユーザの指摘" \
+    && printf '%s' "$rp" | grep -qF "最優先の制約"; then
+    ok
+  else
+    ng "build_regenerate_prompt: note 非空なら最優先の制約として独立セクションで再掲する"
+  fi
+  # note は元提案 frontmatter の後に置く (直近性を効かせるため末尾寄せ。順序が入れ替わると
+  # 多数の frontmatter キーに埋もれる元の状態に戻ってしまう)
+  # why sed -n 1p: 将来プロンプト文面にマーカーと同じ語が増えても複数行を拾って
+  # [ -gt ] が構文エラーにならないよう先頭マッチに限る (head だと broken pipe になる)
+  if [ "$(printf '%s' "$rp" | grep -nF "NOTE_MARKER" | cut -d: -f1 | sed -n 1p)" -gt \
+       "$(printf '%s' "$rp" | grep -nF "TARGET" | cut -d: -f1 | sed -n 1p)" ]; then
+    ok
+  else
+    ng "build_regenerate_prompt: note セクションは target 現在内容より後ろに置く"
+  fi
+
+  # --- decode_note_value (純粋関数) ---
+  if [ "$(decode_note_value '"1 行目\n2 行目"')" = "$(printf '1 行目\n2 行目')" ]; then
+    ok
+  else
+    ng "decode_note_value: JSON 文字列リテラルの \\n を改行にデコードする"
+  fi
+  if [ "$(decode_note_value '"引用符 \" とバックスラッシュ \\ を含む"')" = '引用符 " とバックスラッシュ \ を含む' ]; then
+    ok
+  else
+    ng "decode_note_value: エスケープされた引用符・バックスラッシュをデコードする"
+  fi
+  if [ "$(decode_note_value 'plain text')" = "plain text" ]; then
+    ok
+  else
+    ng "decode_note_value: 引用符で始まらない素の値はそのまま返す"
+  fi
+  if [ -z "$(decode_note_value '')" ]; then
+    ok
+  else
+    ng "decode_note_value: 空値は空のまま返す"
+  fi
+  # 壊れた JSON (閉じ引用符なし) でも note を捨てず生値を返す
+  if [ "$(decode_note_value '"閉じ忘れ')" = '"閉じ忘れ' ]; then
+    ok
+  else
+    ng "decode_note_value: デコード不能なら生値をそのまま返す"
   fi
 
   # --- find_regenerate_proposals ---

@@ -807,21 +807,32 @@ EOF
 「## 理由」に 1 行書いてください。
 EOF
   fi
-  # why kind: claude-md だけ事前ロードを課す: CLAUDE.md は全セッションの毎ターンに
-  # 読み込まれるので、1 行増やす判断の当否が他の target より重く効く。その判断基準は
-  # claude-md-guide が持っているが、スキル一覧に名前が載るだけでは中身は入らず
-  # (実測: 再提案 6 件で Skill 呼び出し 0 回)、ロードは明示的に指示しないと起きない。
+  # why kind ごとに事前ロードを課す: target 種別ごとに「何を良い変更とするか」の基準を
+  # 持つガイドが別にあるが、スキル一覧に名前が載るだけでは中身は入らず (実測: 再提案
+  # 6 件で Skill 呼び出し 0 回)、ロードは明示的に指示しないと起きない。
   # why ロード可能: reflect 自身は disable-model-invocation で Skill 経由の呼び出しが
-  # 塞がれているが、claude-md-guide にその指定は無くヘッドレスからロードできる (実検証済み)。
-  if [ "$4" = "claude-md" ]; then
-    cat <<'EOF'
+  # 塞がれているが、ここで課すガイドにその指定は無くヘッドレスからロードできる (実検証済み)。
+  # why doc/permission/other には課さない: 対応する書き味ガイドが無いので、関係ない
+  # ガイドを毎回読ませるだけになる。
+  case "$4" in
+    claude-md)
+      cat <<'EOF'
 ----- 必須の事前作業 (この提案は CLAUDE.md 宛) -----
 変更内容を作り直す前に、必ず Skill ツールで claude-md-guide をロードし、その原則に
 照らして変更内容を決めてください。CLAUDE.md は全セッションで context を消費するため、
 行を増やす判断はこのガイドの基準 (1 行ごとに「これがないと Claude がミスするか」を
 問う・推測できない情報だけ書く・本体 300 行以下) に従う必要があります。
 EOF
-  fi
+      ;;
+    skill)
+      cat <<'EOF'
+----- 必須の事前作業 (この提案は SKILL.md 宛) -----
+変更内容を作り直す前に、必ず Skill ツールで skill-creator:skill-creator と
+skill-md-guide の両方をロードし、その原則に照らして変更内容を決めてください
+(前者がスキル改修のフロー全体、後者が SKILL.md の書き味の原則を持ちます)。
+EOF
+      ;;
+  esac
   echo "----- (以上) -----"
 }
 
@@ -1798,8 +1809,8 @@ EOF
     ng "build_regenerate_prompt: note セクションは target 現在内容より後ろに置く"
   fi
 
-  # kind: claude-md のときだけ claude-md-guide の事前ロードを課す (他 kind に出すと
-  # 関係ないガイドを毎回読ませることになる)
+  # kind ごとに対応する書き味ガイドの事前ロードを課す (対応ガイドが無い kind には
+  # 出さない。関係ないガイドを毎回読ませることになる)
   rp=$(build_regenerate_prompt "ORIG" "TARGET" "" "claude-md")
   if printf '%s' "$rp" | grep -qF "claude-md-guide" && printf '%s' "$rp" | grep -qF "必須の事前作業"; then
     ok
@@ -1807,14 +1818,29 @@ EOF
     ng "build_regenerate_prompt: kind=claude-md なら claude-md-guide の事前ロードを課す"
   fi
   rp=$(build_regenerate_prompt "ORIG" "TARGET" "" "skill")
+  if printf '%s' "$rp" | grep -qF "skill-creator:skill-creator" \
+    && printf '%s' "$rp" | grep -qF "skill-md-guide" \
+    && printf '%s' "$rp" | grep -qF "必須の事前作業"; then
+    ok
+  else
+    ng "build_regenerate_prompt: kind=skill なら skill-creator と skill-md-guide を課す"
+  fi
+  # kind ごとに出すガイドは混ざらない (SKILL.md 宛に CLAUDE.md の行数基準を持ち込むと
+  # 判断基準がすり替わる)
   if printf '%s' "$rp" | grep -qF "claude-md-guide"; then
-    ng "build_regenerate_prompt: kind が claude-md 以外なら claude-md-guide を課さない"
+    ng "build_regenerate_prompt: kind=skill に claude-md-guide を混ぜない"
+  else
+    ok
+  fi
+  rp=$(build_regenerate_prompt "ORIG" "TARGET" "" "doc")
+  if printf '%s' "$rp" | grep -qF "必須の事前作業"; then
+    ng "build_regenerate_prompt: 対応ガイドの無い kind には事前作業を課さない"
   else
     ok
   fi
   rp=$(build_regenerate_prompt "ORIG" "TARGET" "" "")
-  if printf '%s' "$rp" | grep -qF "claude-md-guide"; then
-    ng "build_regenerate_prompt: kind が空なら claude-md-guide を課さない"
+  if printf '%s' "$rp" | grep -qF "必須の事前作業"; then
+    ng "build_regenerate_prompt: kind が空なら事前作業を課さない"
   else
     ok
   fi

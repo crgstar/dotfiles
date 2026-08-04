@@ -775,7 +775,8 @@ decode_note_value() { # $1=frontmatter の note 生値。デコード済み note
 }
 
 build_regenerate_prompt() { # $1=元提案ファイル全文(frontmatter込み) $2=targetの現在の内容
-  # $3=デコード済み note (空可)。stdout=ヘッドレスへの再生成プロンプト (純粋関数)
+  # $3=デコード済み note (空可) $4=元提案の kind (空可)。
+  # stdout=ヘッドレスへの再生成プロンプト (純粋関数)
   cat <<'EOF'
 /reflect の再提案 (regenerate) モードとして動いてください。SKILL.md の
 「§6a. 再提案 (regenerate) モード」に書かれたルールに従い、次の元提案と target の
@@ -804,6 +805,21 @@ EOF
 この note は最優先の制約です。作り直した変更内容がこの指摘に反するなら提案として
 成立しないので、指摘を満たす形に作り直してください。指摘をどう反映したかは
 「## 理由」に 1 行書いてください。
+EOF
+  fi
+  # why kind: claude-md だけ事前ロードを課す: CLAUDE.md は全セッションの毎ターンに
+  # 読み込まれるので、1 行増やす判断の当否が他の target より重く効く。その判断基準は
+  # claude-md-guide が持っているが、スキル一覧に名前が載るだけでは中身は入らず
+  # (実測: 再提案 6 件で Skill 呼び出し 0 回)、ロードは明示的に指示しないと起きない。
+  # why ロード可能: reflect 自身は disable-model-invocation で Skill 経由の呼び出しが
+  # 塞がれているが、claude-md-guide にその指定は無くヘッドレスからロードできる (実検証済み)。
+  if [ "$4" = "claude-md" ]; then
+    cat <<'EOF'
+----- 必須の事前作業 (この提案は CLAUDE.md 宛) -----
+変更内容を作り直す前に、必ず Skill ツールで claude-md-guide をロードし、その原則に
+照らして変更内容を決めてください。CLAUDE.md は全セッションで context を消費するため、
+行を増やす判断はこのガイドの基準 (1 行ごとに「これがないと Claude がミスするか」を
+問う・推測できない情報だけ書く・本体 300 行以下) に従う必要があります。
 EOF
   fi
   echo "----- (以上) -----"
@@ -844,7 +860,7 @@ finalize_regenerate_source() { # $1=元提案ファイル $2=archivedディレ�
 process_regenerate_item() { # $1=status:regenerateの提案ファイル。1件を再提案処理し
   # 結果行を stdout に返す (成否は戻り値)。失敗時は決定13aどおり元提案を
   # status: regenerate のまま pending に残す (ロールバックする副作用がないため)
-  local file="$1" proposals_dir archdir old_id old_target orig_content target_content note
+  local file="$1" proposals_dir archdir old_id old_target orig_content target_content note kind
   local prompt raw block tmp_block sid save_out new_id
 
   proposals_dir="${REFLECT_PROPOSALS_DIR:-$HOME/dotfiles/.local/reflect-proposals}"
@@ -853,6 +869,7 @@ process_regenerate_item() { # $1=status:regenerateの提案ファイル。1件�
   old_target=$(frontmatter_value "$file" target)
   orig_content=$(cat "$file")
   note=$(decode_note_value "$(frontmatter_value "$file" note)")
+  kind=$(frontmatter_value "$file" kind)
 
   if [ -n "$old_target" ] && [ -f "$old_target" ]; then
     target_content=$(cat "$old_target")
@@ -866,7 +883,7 @@ process_regenerate_item() { # $1=status:regenerateの提案ファイル。1件�
     return 0
   fi
 
-  prompt=$(build_regenerate_prompt "$orig_content" "$target_content" "$note")
+  prompt=$(build_regenerate_prompt "$orig_content" "$target_content" "$note" "$kind")
   raw=$(invoke_regenerate_claude "$prompt")
   block=$(printf '%s\n' "$raw" | extract_block PROPOSAL)
 
@@ -1779,6 +1796,27 @@ EOF
     ok
   else
     ng "build_regenerate_prompt: note セクションは target 現在内容より後ろに置く"
+  fi
+
+  # kind: claude-md のときだけ claude-md-guide の事前ロードを課す (他 kind に出すと
+  # 関係ないガイドを毎回読ませることになる)
+  rp=$(build_regenerate_prompt "ORIG" "TARGET" "" "claude-md")
+  if printf '%s' "$rp" | grep -qF "claude-md-guide" && printf '%s' "$rp" | grep -qF "必須の事前作業"; then
+    ok
+  else
+    ng "build_regenerate_prompt: kind=claude-md なら claude-md-guide の事前ロードを課す"
+  fi
+  rp=$(build_regenerate_prompt "ORIG" "TARGET" "" "skill")
+  if printf '%s' "$rp" | grep -qF "claude-md-guide"; then
+    ng "build_regenerate_prompt: kind が claude-md 以外なら claude-md-guide を課さない"
+  else
+    ok
+  fi
+  rp=$(build_regenerate_prompt "ORIG" "TARGET" "" "")
+  if printf '%s' "$rp" | grep -qF "claude-md-guide"; then
+    ng "build_regenerate_prompt: kind が空なら claude-md-guide を課さない"
+  else
+    ok
   fi
 
   # --- decode_note_value (純粋関数) ---

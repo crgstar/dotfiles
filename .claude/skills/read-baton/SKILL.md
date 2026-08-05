@@ -1,6 +1,6 @@
 ---
 name: read-baton
-description: baton ファイル (`~/.local/state/baton/baton-*.md` / `baton-partial-*.md`) を読む際のスタンス。baton は context 肥大化セッションの成果物で内容が破綻している可能性が高い前提で扱う。ユーザが baton path を貼ったときや、「baton を実行」「引き継ぎ書を読んで」等のリクエストで使う。baton 作成 (/baton)・通常の README / 仕様書読み・コードレビューは対象外。
+description: baton ファイル (`~/.local/state/baton/baton-*.md` / `baton-partial-*.md`) を読む際のスタンス。baton は context 肥大化セッションの成果物で内容が破綻している可能性が高い前提で扱う。ユーザが baton path を貼ったときや、「baton を実行」「引き継ぎ書を読んで」等のリクエストで使う。「read <path>」「cat <path>」のようにツールを名指しした依頼でも、対象が baton ファイルならこのスキルを使う。baton 作成 (/baton)・通常の README / 仕様書読み・コードレビューは対象外。
 ---
 
 baton は context 肥大化セッションの成果物。読了後まず引き継ぎ範囲を数行で要約してユーザに示し (全文を追わず範囲を把握できるように)、baton に記録された branch / HEAD / dirty 状態を実 repo と突き合わせた結果も一言添える (ズレていれば「現在の状態」系の記述は古い前提で読む)。書いてある内容は次のスタンスで疑って読む。

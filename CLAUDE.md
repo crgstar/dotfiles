@@ -5,10 +5,12 @@ Claude Code の設定ファイル・スキル、およびシェル設定を管�
 ## セットアップ
 
 ```bash
-./setup.sh [home|work]  # 環境名は省略可。省略すると各設定の base のみがリンクされ、common.json や環境別ファイルとのマージは行われない
+./setup.sh [home|work]                # 環境名は省略可。省略すると各設定の base のみがリンクされ、common.json や環境別ファイルとのマージは行われない
+./setup.sh <env> --only skills,hooks  # 一部だけ再配線。ターゲット一覧は ./setup.sh --list
 ```
 
 - `jq` が必要（設定のマージに使用）
+- 非対話（Claude / CI から実行）では、衝突があっても止まらず全ターゲットを走り切る。衝突ごとにその場で差分を表示し、最後に未解決の一覧を出して exit 1 する。`--force` でマージ結果 / dotfiles 側を採用（既存は `.bak`）、`--keep` で既存維持のまま正常終了
 
 ## 設定の仕組み
 
@@ -54,7 +56,7 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
 ## ファイル追加時の規約
 
 - 設定ファイルは `link_file` 関数でシンボリックリンクする（コピーではない）
-- 新しいリンク対象を追加した場合は `setup.sh` にも `link_file` の呼び出しを追加する
+- 新しいリンク対象を追加した場合は `setup.sh` の該当する `target_*` 関数に `link_file` の呼び出しを追加する。関数の外に置くと `--only` の部分実行から漏れる
 - スキルは `.claude/skills/<skill-name>/SKILL.md` に配置し、`~/.claude/skills/` へリンクする
 - カスタムサブエージェントは `.claude/agents/<name>.md` に配置し、`~/.claude/agents/` へリンクする（user スコープ）。スキルが委譲する隔離処理 (生ログ・秘密の検査) や別コンテキストでのレビューを tools 制限付きで担わせる用途。判定基準は写経せず、呼び出し元 SKILL.md の該当節を Read させる (例: `retro-extractor` / `sanitize-auditor` / `doc-reviewer` / `skill-md-reviewer`)
 - 第三者リポのスキルは dotfiles に取り込まず、`~/.local/share/<name>/` に shallow clone してから `link_file` で配る (例: `mattpocock-skills` / `grill-me` / `grill-with-docs`)
@@ -69,7 +71,7 @@ hook 種別 (PreToolUse / PermissionRequest)、応答 JSON 形式、`segment-all
 
 ## setup.sh のコンフリクト対応
 
-`.claude/settings.merged.json` / `.claude/CLAUDE.merged.md` は、セッション中の `/update-config` や動的 allow 追加で既存 merged がソースより先行すると対話プロンプトで停止する。
+`.claude/settings.merged.json` / `.claude/CLAUDE.merged.md` は、セッション中の `/update-config` や動的 allow 追加で既存 merged がソースより先行すると衝突する。TTY では下記の対話プロンプトで停止し、非対話では未解決として報告され exit 1 になる（`--force` / `--keep` で明示すれば止まらない）。
 
 - **順序のみの差分**: 即 `n` で上書き（ソース正）
 - **実質的な追加あり**: 先にソースへ還流してから `n`

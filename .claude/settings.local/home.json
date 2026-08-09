@@ -2,6 +2,8 @@
   "includeCoAuthoredBy": false,
   "permissions": {
     "allow": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
       "Bash(python ~/.claude/skills/ios-simulator-skill/scripts/*)",
       "Bash(bash ~/.claude/skills/ios-simulator-skill/scripts/*)",
       "Bash(cd ~/.claude/skills/ios-simulator-skill/scripts*)",

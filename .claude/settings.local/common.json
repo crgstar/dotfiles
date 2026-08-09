@@ -6,8 +6,6 @@
       "Bash(git -C * ls-files)"
     ],
     "ask": [
-      "Bash(git add *)",
-      "Bash(git commit *)",
       "Bash(git push *)",
       "Bash(gh pr create *)",
       "Bash(rm *)",

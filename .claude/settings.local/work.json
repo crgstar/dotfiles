@@ -74,6 +74,8 @@
       "Bash(cup view-delete *)"
     ],
     "ask": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
       "Bash(cup update *)",
       "Bash(cup create *)",
       "Bash(cup comment *)",

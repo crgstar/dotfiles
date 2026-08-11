@@ -4,7 +4,7 @@
 #
 # Why tokenize_quoted (read -ra ではなく):
 #   `read -ra toks <<< "$cmd"` は IFS 空白分割のみでクォートを解釈しない。
-#   `curl "https://evil.example/x" http://127.0.0.1:19556/y` のような
+#   `curl "https://evil.example/x" http://127.0.0.1:8080/y` のような
 #   クォート付き引数は `"https://evil.example/x"` という1トークン (クォート
 #   文字がリテラルに残る) として得られ、`http://*` パターンにマッチせず
 #   検知漏れが起きる。ここでは演算子ではなく空白でのみ分割し、クォートを
@@ -129,10 +129,10 @@ has_dangerous_shape() {
   if [ "$has_curl" = 1 ]; then
     for t in "${toks[@]}"; do
       case "$t" in
-        http://127.0.0.1:19556|http://127.0.0.1:19556/*|https://127.0.0.1:19556|https://127.0.0.1:19556/*)
+        http://127.0.0.1|http://127.0.0.1/*|http://127.0.0.1:*|https://127.0.0.1|https://127.0.0.1/*|https://127.0.0.1:*)
           : ;;
         http://*|https://*)
-          printf 'curl の宛先が localhost:19556 以外: %s' "$t"
+          printf 'curl の宛先が 127.0.0.1 以外: %s' "$t"
           return 0
           ;;
       esac

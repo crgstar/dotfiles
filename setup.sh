@@ -425,6 +425,16 @@ target_claude_settings() {
       merge_inputs=("$DOTFILES_DIR/.claude/settings.json")
       [ -f "$DOTFILES_DIR/.claude/settings.local/common.json" ] \
         && merge_inputs+=("$DOTFILES_DIR/.claude/settings.local/common.json")
+      # why: 別リポは git pull で中身が変わるので、ファイル全体を混ぜると permissions /
+      #      hooks を無審査で取り込む (allow は prefixes が safe-prefix に転写する)。
+      local spinner_json="$HOME/projects/claude-spinner-verbs-japanese/spinner-verbs.json"
+      local spinner_tmp="" spinner_note=""
+      if [ -f "$spinner_json" ]; then
+        spinner_tmp="$(mktemp "${TMPDIR:-/tmp/}spinner-verbs-XXXXXX")"
+        jq 'if has("spinnerVerbs") then {spinnerVerbs} else {} end' "$spinner_json" > "$spinner_tmp"
+        merge_inputs+=("$spinner_tmp")
+        spinner_note=" + spinner-verbs.json"
+      fi
       merge_inputs+=("$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json")
 
       # jqで設定をマージ（配列は自動的に結合）
@@ -458,13 +468,17 @@ target_claude_settings() {
         "${merge_inputs[@]}" \
         > "$DOTFILES_DIR/.claude/settings.merged.json.tmp"
 
+      if [ -n "$spinner_tmp" ]; then
+        rm -f "$spinner_tmp"
+      fi
+
       safe_overwrite "$DOTFILES_DIR/.claude/settings.merged.json.tmp" \
                      "$DOTFILES_DIR/.claude/settings.merged.json"
 
       link_file "$DOTFILES_DIR/.claude/settings.merged.json" \
                 "$HOME/.claude/settings.json"
 
-      echo "設定をマージしました: settings.json + common.json + settings.local/$HOST_ENV.json"
+      echo "設定をマージしました: settings.json + common.json${spinner_note} + settings.local/$HOST_ENV.json"
     else
       echo "警告: jqがインストールされていません。設定のマージをスキップします。"
       link_file "$DOTFILES_DIR/.claude/settings.json" \

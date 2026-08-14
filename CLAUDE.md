@@ -22,7 +22,8 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
 - `.claude/settings.local/common.json` — 全ローカル env 共通の追加層
 - `.claude/settings.local/<env>.json` — 環境別の追加設定
 - `.claude/settings.local.json` — このリポジトリ固有のプロジェクト設定
-- setup.sh が jq で `base → common → <env>` の順にマージして `.claude/settings.merged.json` に書き出し、`~/.claude/settings.json` にシンボリックリンク
+- `~/projects/claude-spinner-verbs-japanese/spinner-verbs.json` — dotfiles 外の別リポにある spinner 語彙データ。存在するときだけ `spinnerVerbs` キーのみを抽出して common の後ろに挟む（無ければ黙って省略）
+- setup.sh が jq で `base → common → (spinner) → <env>` の順にマージして `.claude/settings.merged.json` に書き出し、`~/.claude/settings.json` にシンボリックリンク
 - 配列フィールド（permissions.allow 等）はマージ時に結合される（上書きではない）
 - IMPORTANT: `permissions.ask` など「対話セッション専用」の設定は base ではなく **common.json** に置く。base はクラウド routine がクローン先で project 設定として直読みするため、base に ask を置くと routine が `git push` 等で承認待ちに止まる。routine は setup.sh を通らず base だけ読むので、common 経由なら routine は ask 無し（自律実行）・ローカルは ask 維持を両立できる（Claude Code は配列スコープを union するので上位から ask を消せない＝base から除くのが唯一の手段）
 

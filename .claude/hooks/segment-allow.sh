@@ -153,46 +153,70 @@ split_segments() {
 #   残り、`echo *` 等の safe prefix にマッチして素通りしてしまう。
 #   例: `gh api foo & rm -rf ~` は 1 セグメントで `gh api ` 始まり扱いになる。
 #   これらを含むセグメントは prefix が何であれ unsafe に倒す（構造の白名簿化）。
-# 位置 $2 から `2>&1` が単語として始まっているかを判定する(純粋関数)。
+# 位置 $2 から「副作用の無いリダイレクト」が単語として始まっているかを判定する
+# (純粋関数)。該当したら読み飛ばすべき文字数を _NOOP_REDIRECT_LEN に置く。
 # 0: 該当 / 1: 非該当
+#
+# 対象は fd 複製の `2>&1` と /dev/null への出力破棄のみ。どちらもファイル生成も
+# コマンド実行も伴わず、/dev/null は書き込みが常に捨てられる特殊デバイスなので
+# リダイレクト先の変動もない。
 #
 # why 単語境界を要求する: 境界を見ないと `12>&1`(fd 12 の複製) の途中から
 # 4 文字を消して先頭の `1` だけを残すような、実 bash の解釈とズレた読み方に
 # なる。前後が空白か端であることを確かめてから読み飛ばす。
-_is_word_bounded_2gt1() {
-  local s="$1" i="$2" len="$3" prev next
-  [ "${s:$i:4}" = '2>&1' ] || return 1
+# why 長いリテラルを先に試す: `1>/dev/null` は前方境界チェックにより `>` の
+# 位置からは一致しない（直前が `1` で空白でない）ので二重に読み飛ばされないが、
+# 照合順を長い順にしておけば将来リテラルを増やしても同じ性質が保たれる。
+# why 空白入り (`2> /dev/null`) を対象外にする: 既存の `2>&1` が `2>& 1` を
+# 通さないのと揃える。読み飛ばしをリテラル一致に閉じておくほうが安全側。
+_NOOP_REDIRECT_LEN=0
+_is_word_bounded_noop_redirect() {
+  local s="$1" i="$2" len="$3" lit n prev next
+  _NOOP_REDIRECT_LEN=0
   if [ "$i" -gt 0 ]; then
     prev="${s:$((i-1)):1}"
     case "$prev" in ' '|$'\t') ;; *) return 1 ;; esac
   fi
-  if [ $((i+4)) -lt "$len" ]; then
-    next="${s:$((i+4)):1}"
-    case "$next" in ' '|$'\t') ;; *) return 1 ;; esac
-  fi
-  return 0
+  for lit in '2>/dev/null' '1>/dev/null' '&>/dev/null' '>/dev/null' '2>&1'; do
+    n=${#lit}
+    [ "${s:$i:$n}" = "$lit" ] || continue
+    if [ $((i+n)) -lt "$len" ]; then
+      next="${s:$((i+n)):1}"
+      case "$next" in ' '|$'\t') ;; *) continue ;; esac
+    fi
+    _NOOP_REDIRECT_LEN="$n"
+    return 0
+  done
+  return 1
 }
 
 # ' " ` のクォートは尊重するが、ダブルクォート内でも $ と ` は展開されるため危険とみなす。
 # gh api の /tmp リダイレクト例外は、呼び出し側が > を剥がしてからこの関数に渡す。
 #
-# 例外: 単語として現れる `2>&1` だけは読み飛ばす。fd 2 を fd 1 に複製するだけで
-#   ファイル書き込みもコマンド実行も伴わないうえ、`gh api ... 2>&1 | head` の形で
-#   多用するため。単語境界を要求するので `&>file`（全出力をファイルへ）や
-#   `2>file` は従来通り検出される。読み飛ばすのは 4 文字ちょうどなので、
-#   `2>&1 & rm -rf ~` のように後続に別のメタ文字が続く形も取りこぼさない。
+# 例外: 単語として現れる `2>&1` と `>/dev/null` 系だけは読み飛ばす。fd の複製と
+#   出力の破棄だけでファイル書き込みもコマンド実行も伴わないうえ、
+#   `gh api ... 2>/dev/null | head` の形で多用するため。単語境界を要求するので
+#   `&>file`（全出力をファイルへ）や `2>file` は従来通り検出される。読み飛ばすのは
+#   一致したリテラルの長さちょうどなので、`2>&1 & rm -rf ~` のように後続に別の
+#   メタ文字が続く形も取りこぼさない。
 has_unsafe_metachar() {
   local s="$1"
   local i=0 len=${#s} ch
   local in_single=0 in_double=0 bs_run=0
   while [ "$i" -lt "$len" ]; do
     ch="${s:$i:1}"
-    # why `$ch` = 2 を先に見る: この関数は 1 文字ずつ全体を走査するので、
-    # 数千文字の GraphQL クエリでは関数呼び出しがそのまま本数になる。
-    if [ "$ch" = '2' ] && [ "$in_single" = 0 ] && [ "$in_double" = 0 ] \
-       && _is_word_bounded_2gt1 "$s" "$i" "$len"; then
-      i=$((i+4))
-      continue
+    # why リダイレクト開始文字だけを先に見る: この関数は 1 文字ずつ全体を走査する
+    # ので、数千文字の GraphQL クエリでは関数呼び出しがそのまま本数になる。
+    # 読み飛ばし候補が始まりうる文字に絞ってから判定関数を呼ぶ。
+    if [ "$in_single" = 0 ] && [ "$in_double" = 0 ]; then
+      case "$ch" in
+        '2'|'1'|'>'|'&')
+          if _is_word_bounded_noop_redirect "$s" "$i" "$len"; then
+            i=$((i+_NOOP_REDIRECT_LEN))
+            continue
+          fi
+          ;;
+      esac
     fi
     if [ "$in_single" = 1 ]; then
       [ "$ch" = "'" ] && in_single=0
@@ -284,6 +308,75 @@ _gh_graphql_value_ok() {
   return 0
 }
 
+# `sed ...` セグメント（trim 済み前提）が「行範囲の表示だけ」と確認できるか判定する。
+# 0: safe / 1: not safe
+#
+# Why 専用判定: 静的 allow の `Bash(sed *)` は glob 照合なので
+#   `sed -n '60,90p'` と `sed -i '' 's/x/y/' ~/.zshrc` を区別できない。
+#   `Bash(sed -n *)` に絞っても `sed -n -i.bak 's/x/y/' f` が同じ glob に一致する。
+#   引数の意味を見ないと読み書きを分けられないので gh api と同じく hook が負う。
+#
+# Why ブラックリストではなくホワイトリスト: sed の副作用の口は `-i` だけではない。
+#   スクリプト本文の `w file` / `s///w file` は任意ファイルへ書き出し、GNU sed の
+#   `e` コマンドと `s///e` フラグはシェルコマンドを実行する (BSD には無い)。
+#   フラグだけ見る判定はこれらを丸ごと素通りさせ、実装や版が変わるたびに黙って
+#   穴が開く。「数値アドレス + p」しか受理しなければ、w も e も s も文字として
+#   現れる余地そのものが無くなる。
+#
+# Why -n 以外のフラグを一律拒否する: 引数を取るフラグが混ざると「次のトークンは
+#   何か」の解釈が必要になり、それが実装で食い違う。BSD の `-i` は次の引数を拡張子
+#   として食い、`-e` はスクリプトを食う。`-l` は BSD では引数なし(行バッファリング)
+#   だが GNU では数値を取る(l コマンドの折り返し幅)。-n 以外を落とせば arity を
+#   解釈する必要そのものが消える。無害な `-E` / `-u` も、受理面を広げるほど
+#   「表示しかしない」証明が長くなるので入れない。
+is_safe_sed() {
+  local seg="$1"
+
+  # why トークン化前に改行を弾く: tokenize_quoted は改行を含むトークンでも
+  # 出力を改行区切りにするため、クォート内改行を持つスクリプトが呼び出し側の
+  # `read -r` で複数トークンに割れる。`sed -n '1,5p<改行>w /tmp/x'` は
+  # 「スクリプト `1,5p`」+「入力ファイル名 `w /tmp/x`」と読まれ、実際には
+  # sed の w コマンド (任意ファイルへの書き出し) や GNU の e コマンド
+  # (シェルコマンド実行) が allow で通ってしまう。is_safe_gh_graphql が
+  # mutation 判定をトークン化に依存させないのと同じ理由で、ここでは
+  # 改行を含むセグメントそのものを受理しない。
+  case "$seg" in
+    *$'\n'*) return 1 ;;
+  esac
+
+  # 数値アドレス (+ 最終行 `$`) を p で表示するだけのスクリプト。
+  # `/re/p` を含めない: 区切り文字の変更 (`\%re%p`) やエスケープの解釈が必要になり、
+  # 「スクリプトに w / e が現れない」を機械的に言えなくなる。
+  local script_re='^[0-9]+(,([0-9]+|\$))?p$'
+  local t first=1 saw_n=0 saw_script=0
+
+  while IFS= read -r t; do
+    if [ "$first" = 1 ]; then
+      first=0
+      # `/usr/bin/sed` や `command sed` は対象外 (素の sed だけを見る)。
+      [ "$t" = 'sed' ] || return 1
+      continue
+    fi
+    case "$t" in
+      -n|--quiet|--silent) saw_n=1 ;;
+      # `-` (標準入力オペランド) もここで落ちる。読み取り専用だが受理面を
+      # 増やさない方針に倒す。
+      -*) return 1 ;;
+      *)
+        # sed は最初の非フラグオペランドをスクリプトとして解釈する。2 個目以降は
+        # 入力ファイル名で、読むだけなので受理する (cat * / head * が任意パスで
+        # 静的 allow 済みなのと揃える)。
+        if [ "$saw_script" = 0 ]; then
+          [[ "$t" =~ $script_re ]] || return 1
+          saw_script=1
+        fi
+        ;;
+    esac
+  done < <(tokenize_quoted "$seg")
+
+  [ "$saw_n" = 1 ] && [ "$saw_script" = 1 ]
+}
+
 # 単一セグメント（trim 済み前提）が safe-prefix に該当するか判定する。
 # 0: safe / 1: not safe
 is_safe_segment() {
@@ -346,6 +439,12 @@ is_safe_segment() {
         esac
       done < <(tokenize_quoted "$seg")
       return 0
+      ;;
+    # sed も静的 allow には載せず (glob では読み書きを分けられない)、
+    # 行範囲の表示だけと証明できるときに hook が auto-allow する。
+    'sed '*)
+      is_safe_sed "$seg" && return 0
+      return 1
       ;;
   esac
 
@@ -491,9 +590,50 @@ run_self_test() {
   assert_unsafe '2>&1 の後に & が続く' 'gh api repos/foo/bar/pulls/1 2>&1 & rm -rf /tmp/x'
   assert_unsafe '2>&1 とファイル書き込みの併用' 'gh api repos/foo/bar/pulls/1 2>&1 > /home/user/.zshrc'
   assert_unsafe '&> は全出力のファイル書き込み' 'gh api repos/foo/bar/pulls/1 &> /tmp/x'
-  assert_unsafe '2>file は読み飛ばさない' 'gh api repos/foo/bar/pulls/1 2>/dev/null'
+  assert_unsafe '2>file は読み飛ばさない' 'gh api repos/foo/bar/pulls/1 2>/home/user/err.log'
   assert_unsafe '>&1 (2 が無い形) は読み飛ばさない' 'gh api repos/foo/bar/pulls/1 >&1'
   assert_unsafe '12>&1 は単語境界を満たさない' 'gh api repos/foo/bar/pulls/1 12>&1'
+
+  # /dev/null への出力破棄も副作用が無いため読み飛ばす
+  assert_safe '2>/dev/null | パイプ' "gh api repos/foo/bar/contents/f --jq '.content' 2>/dev/null | head -30"
+  assert_safe '>/dev/null 2>&1 の併用' 'gh api repos/foo/bar/pulls/1 >/dev/null 2>&1'
+  assert_safe '1>/dev/null' 'gh api repos/foo/bar/pulls/1 1>/dev/null'
+  assert_safe '&>/dev/null' 'gh api repos/foo/bar/pulls/1 &>/dev/null'
+  assert_safe 'gh api 以外のセグメントの 2>/dev/null' 'echo start 2>/dev/null && gh api repos/foo/bar/pulls/1'
+  assert_unsafe '空白入り 2> /dev/null は対象外' 'gh api repos/foo/bar/pulls/1 2> /dev/null'
+  assert_unsafe '/dev/null に見せた別パス' 'gh api repos/foo/bar/pulls/1 2>/dev/nullx'
+  assert_unsafe '12>/dev/null は単語境界を満たさない' 'gh api repos/foo/bar/pulls/1 12>/dev/null'
+  assert_unsafe '>/dev/null とファイル書き込みの併用' 'gh api repos/foo/bar/pulls/1 >/dev/null > /home/user/.zshrc'
+
+  # sed: 「-n + 数値アドレス p」だけを受理する (それ以外は書き込み/実行を証明できない)
+  assert_safe 'sed -n 行範囲' "gh api repos/foo/bar/contents/f --jq '.content' | sed -n '60,90p'"
+  assert_safe 'sed -n 単一行' "gh api repos/foo/bar/pulls/1 | sed -n '5p'"
+  assert_safe 'sed -n 最終行まで' "gh api repos/foo/bar/pulls/1 | sed -n '60,\$p'"
+  assert_safe 'sed -n + ファイルオペランド' "gh api repos/foo/bar/pulls/1 | sed -n '1,20p' notes.txt"
+  assert_safe 'sed -n と 2>/dev/null の併用' "gh api repos/foo/bar/pulls/1 2>/dev/null | sed -n '1,30p'"
+  assert_safe 'sed --quiet (long form)' "gh api repos/foo/bar/pulls/1 | sed --quiet '1,5p'"
+  assert_unsafe 'sed -i は in-place 編集' "gh api repos/foo/bar/pulls/1 | sed -i '' 's/x/y/' /home/user/.zshrc"
+  assert_unsafe 'sed -I も in-place 編集' "gh api repos/foo/bar/pulls/1 | sed -I '' 's/x/y/' /home/user/.zshrc"
+  assert_unsafe 'sed の w はファイル書き出し' "gh api repos/foo/bar/pulls/1 | sed -n '1,5w /tmp/x'"
+  assert_unsafe 'sed の s///w もファイル書き出し' "gh api repos/foo/bar/pulls/1 | sed -n 's/x/y/w /tmp/x'"
+  assert_unsafe 'sed の e はコマンド実行 (GNU)' "gh api repos/foo/bar/pulls/1 | sed -n '1,5p;9e cat /etc/passwd'"
+  assert_unsafe 'sed -e は複数スクリプトを足せる' "gh api repos/foo/bar/pulls/1 | sed -n -e '1p' -e '2w /tmp/x'"
+  assert_unsafe 'sed -f はスクリプト本体が外部' 'gh api repos/foo/bar/pulls/1 | sed -f /tmp/script.sed'
+  assert_unsafe 'sed 正規表現アドレスは対象外' "gh api repos/foo/bar/pulls/1 | sed -n '/secret/p'"
+  assert_unsafe 'sed -n なしは受理しない' "gh api repos/foo/bar/pulls/1 | sed '60,90p'"
+  assert_unsafe 'sed の未知フラグ (-E)' "gh api repos/foo/bar/pulls/1 | sed -E -n '1,5p'"
+  assert_unsafe 'sed の未知フラグ (-u)' "gh api repos/foo/bar/pulls/1 | sed -u -n '1,5p'"
+  assert_unsafe 'sed 置換スクリプト' "gh api repos/foo/bar/pulls/1 | sed -n 's/x/y/p'"
+  assert_unsafe 'パス付き sed は対象外' "gh api repos/foo/bar/pulls/1 | /usr/bin/sed -n '1,5p'"
+  assert_unsafe 'sed 単体 (gh api を含まない)' "sed -n '1,5p' notes.txt"
+  # クォート内改行はトークン化の出力を割るので、2 行目以降が入力ファイル名として
+  # 受理されて w / e が素通りする。セグメントに改行があれば無条件で落とす。
+  assert_unsafe 'sed スクリプト内改行 + w (ファイル書き出し)' "gh api repos/foo/bar/pulls/1 | sed -n '1,5p
+w /tmp/pwned'"
+  assert_unsafe 'sed スクリプト内改行 + e (コマンド実行)' "gh api repos/foo/bar/pulls/1 | sed -n '1p
+1e rm -rf /tmp/x'"
+  assert_unsafe 'sed スクリプト内改行 + s///w' "gh api repos/foo/bar/pulls/1 | sed -n '1p
+s/a/b/w /tmp/pwned'"
 
   # gh api graphql: mutation を含まない参照クエリは -f query=... 付きでも allow
   assert_safe 'graphql introspection' "gh api graphql -f query='query { __type(name: \"ProjectV2SingleSelectField\") { fields { name type { name kind ofType { name } } } } }'"

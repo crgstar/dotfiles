@@ -16,6 +16,7 @@ TARGETS=(
   "claude-md:CLAUDE.md を base+env でマージし、FABLE.md と併せてリンク"
   "skills:スキル・サブエージェント定義のリンク (第三者リポの clone を含む)"
   "hooks:permission 系 hook スクリプトのリンク"
+  "statusline:statusLine ラッパと RunCat Neo 用スナップショット生成のリンク"
   "reflect:reflect 無人実行 (SessionEnd hook + launchd 夜間ドライバ)"
   "prefixes:segment-allow.prefixes を permissions.allow から再生成 (claude-settings の後)"
   "mcp:settings.local/<env>.json の mcpServers を ~/.claude.json へマージ"
@@ -643,6 +644,13 @@ target_hooks() {
             "$HOME/.claude/hooks/escalate-unsafe-bash.sh"
   link_file "$DOTFILES_DIR/.claude/hooks/scratchpad-rm-allow.sh" \
             "$HOME/.claude/hooks/scratchpad-rm-allow.sh"
+}
+
+target_statusline() {
+  link_file "$DOTFILES_DIR/.claude/statusline/statusline.sh" \
+    "$HOME/.claude/statusline.sh"
+  link_file "$DOTFILES_DIR/.claude/statusline/runcat-statusline.py" \
+    "$HOME/.claude/runcat-statusline.py"
 }
 
 target_reflect() {

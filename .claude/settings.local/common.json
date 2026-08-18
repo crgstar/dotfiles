@@ -1,4 +1,9 @@
 {
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh",
+    "padding": 0
+  },
   "permissions": {
     "allow": [
       "Bash(git ls-files *)",
@@ -20,6 +25,27 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/reflect-enqueue.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y ccstatusline@latest --hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y ccstatusline@latest --hook"
           }
         ]
       }

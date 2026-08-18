@@ -578,6 +578,16 @@ target_skills() {
   link_file "$DOTFILES_DIR/.claude/skills/shared/review-severity.md" \
             "$HOME/.claude/skills/shared/review-severity.md"
 
+  # why: PR レビューの投稿・返信フロー。どちらも返信/指摘本文の末尾に署名を必須と
+  #      しており、PreToolUse hook (pr-comment-signature.sh) が「スキルを経由せず
+  #      gh api を直接叩いた投稿」を ask に格上げしてこの規定を担保する。
+  #      hook 側だけ dotfiles にあってスキル本体が外に残ると、規定の出典が
+  #      公開リポから読めなくなるので揃えて管理する。
+  link_file "$DOTFILES_DIR/.claude/skills/review-comment/SKILL.md" \
+            "$HOME/.claude/skills/review-comment/SKILL.md"
+  link_file "$DOTFILES_DIR/.claude/skills/respond-to-pr-review/SKILL.md" \
+            "$HOME/.claude/skills/respond-to-pr-review/SKILL.md"
+
   # ----- auq-web skill -----
   # why: auq-web は SKILL.md/references (Claude が読むテキスト) を他スキルと同じく
   #   dotfiles で管理し、server 実体は別リポ (auq-web) に置く分割構成。
@@ -644,6 +654,8 @@ target_hooks() {
             "$HOME/.claude/hooks/escalate-unsafe-bash.sh"
   link_file "$DOTFILES_DIR/.claude/hooks/scratchpad-rm-allow.sh" \
             "$HOME/.claude/hooks/scratchpad-rm-allow.sh"
+  link_file "$DOTFILES_DIR/.claude/hooks/pr-comment-signature.sh" \
+            "$HOME/.claude/hooks/pr-comment-signature.sh"
 }
 
 target_statusline() {

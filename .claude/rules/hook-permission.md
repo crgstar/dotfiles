@@ -16,7 +16,7 @@ hook を新規追加・改修するとき、`permissions.allow` を触るとき�
 
 ## 典型パターン
 
-- 「デフォ allow + 危険なパターンだけ hook で ask/deny 格上げ」→ PreToolUse（実例: `escalate-unsafe-bash.sh`。`find -exec`/`-delete`・非 localhost 宛て `curl`・dotfiles 外の skills スクリプト実行を ask に格上げ。`--self-test` あり）
+- 「デフォ allow + 危険なパターンだけ hook で ask/deny 格上げ」→ PreToolUse（実例: `escalate-unsafe-bash.sh`。`find -exec`/`-delete`・非 localhost 宛て `curl`・dotfiles 外の skills スクリプト実行を ask に格上げ。`--self-test` あり / `pr-comment-signature.sh`。後述）
 - 「デフォ ask + 安全なパターンだけ hook で allow に素通し」→ PermissionRequest（実例: `segment-allow.sh` / `scratchpad-rm-allow.sh`）
 
 hook handler には `if` フィールドで permission rule 構文の絞り込みを書ける（`"if": "Bash(rm *)"`）。1 handler に 1 ルールだけで `&&`/リスト構文は無い（複数条件は handler を分ける）。マッチしないときはプロセスを起動しないので、同じ matcher に用途別の handler を並べてよい。ただしコマンドがパースできないと fail open（`if` を無視して起動）するため、hook 側の判定は `if` に依存せず単独で完結させる。
@@ -83,3 +83,18 @@ safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` 
 `session_id` を実パスに埋めるので、並行して動く別セッションや別 uid の scratchpad は allow されない。scratchpad のパス規約が将来変わっても照合が外れて ask に落ちるだけで、安全側に倒れる。
 
 self-test: `bash .claude/hooks/scratchpad-rm-allow.sh --self-test`
+
+## pr-comment-signature.sh の格上げ条件
+
+`respond-to-pr-review` / `review-comment` は返信・指摘の末尾に「空行 + Claude Code の署名」を必須としているが、スキルを経由せず `gh api` を直接叩くと規定を踏まずに投稿できてしまう。PreToolUse hook (`.claude/hooks/pr-comment-signature.sh`) が、コメント本文を送る `gh api` 呼び出しで署名を確認できないときだけ ask に格上げする。判定できないケース（本文ファイルを解決できない・入力 JSON を解釈できない）は pass ではなく ask に倒す。
+
+対象とする投稿経路（**どれか 1 つでも落とすと一番よく使う経路が素通りする**）:
+
+- REST: パスに `/comments` / `/replies` / `/reviews` を含み、かつ本文フィールドを渡している呼び出し。本文フィールドは `body=` だけでなく PENDING レビューを作る `-F 'comments[][body]=...'` のようなネスト形も拾う（`review-comment` の既定の投稿経路がこの形）
+- GraphQL: `gh api graphql` で `mutation` と `body` を含む呼び出し（既存 PENDING レビューへ追記する `addPullRequestReviewThread` 等）。REST のパス判定に掛からないので別経路で見る。参照クエリは `mutation` が無いので対象外
+
+`-F` / `--field` の `body=@file` だけがファイル参照なので、解決したファイルの中身を 1 件ずつ検査する（連結して見ると「どれか 1 つに署名があれば通る」抜けができる）。`-f` / `--raw-field` は `@` を展開せずリテラル `@path` を本文として送るため、ファイル参照として除外せずコマンド文字列側の署名確認に回す。
+
+`gh api` 以外の投稿経路（`gh pr comment` / `gh pr review` / `gh issue comment`）は現状カバーしていない。
+
+self-test: `bash .claude/hooks/pr-comment-signature.sh --self-test`

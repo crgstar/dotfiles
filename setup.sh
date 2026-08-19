@@ -598,6 +598,21 @@ target_skills() {
   link_file "$DOTFILES_DIR/.claude/skills/review-fix/SKILL.md" \
             "$HOME/.claude/skills/review-fix/SKILL.md"
 
+  # why: この 2 スキルの evals はレビュー対象の実データ (差分・判定結果・レビュー原本) を
+  #      含むので dotfiles には置かない。実体はローカルの ~/.agents/skills/<name>/evals に
+  #      残したまま、スキルルート配下へディレクトリごと symlink して SKILL.md と同じ階層に
+  #      見せる (evals.json がスキルルート基準で evals/README.md 等を参照するため)。
+  #      公開リポの作業ツリーに実データを一切置かない形なので、誤コミットが構造的に起きない
+  #      (dotfiles 内に置いて .gitignore で除く形だと add -f や記述漏れで入り得る)。
+  #      非公開データなので新しいマシンには無い。その場合は黙ってスキップし SKILL.md だけ配る。
+  local agents_skills_dir="$HOME/.agents/skills"
+  local review_skill
+  for review_skill in review-verdict review-fix; do
+    [ -d "$agents_skills_dir/$review_skill/evals" ] || continue
+    link_file "$agents_skills_dir/$review_skill/evals" \
+              "$HOME/.claude/skills/$review_skill/evals"
+  done
+
   # ----- auq-web skill -----
   # why: auq-web は SKILL.md/references (Claude が読むテキスト) を他スキルと同じく
   #   dotfiles で管理し、server 実体は別リポ (auq-web) に置く分割構成。

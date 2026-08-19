@@ -588,6 +588,16 @@ target_skills() {
   link_file "$DOTFILES_DIR/.claude/skills/respond-to-pr-review/SKILL.md" \
             "$HOME/.claude/skills/respond-to-pr-review/SKILL.md"
 
+  # why: respond-to-pr-review の Phase 2 が採否判定と修正実装をこの 2 スキルへ
+  #      委譲する。委譲先が dotfiles 外にあると setup.sh を通した他マシンで
+  #      参照が解決できず手順が成立しないので、委譲元と揃えて管理する。
+  #      evals は実データ (レビュー対象の差分・判定結果) を含むので取り込まず
+  #      .agents 側に残す。sentinel も evals/evals.json だけを管理しているのと同じ扱い。
+  link_file "$DOTFILES_DIR/.claude/skills/review-verdict/SKILL.md" \
+            "$HOME/.claude/skills/review-verdict/SKILL.md"
+  link_file "$DOTFILES_DIR/.claude/skills/review-fix/SKILL.md" \
+            "$HOME/.claude/skills/review-fix/SKILL.md"
+
   # ----- auq-web skill -----
   # why: auq-web は SKILL.md/references (Claude が読むテキスト) を他スキルと同じく
   #   dotfiles で管理し、server 実体は別リポ (auq-web) に置く分割構成。

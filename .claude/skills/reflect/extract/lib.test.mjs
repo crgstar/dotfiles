@@ -339,6 +339,31 @@ test("renderAnnotationsSection: author=user のみ抽出し replyTo を併記す
   assert.ok(out.includes("y.js:1-3 — range comment"));
 });
 
+// ---- buildDigest: session map の title 導出 ----
+
+test("buildDigest: title は custom-title を ai-title より優先する", () => {
+  const events = [
+    { type: "ai-title", aiTitle: "自動生成された名前" },
+    { type: "custom-title", customTitle: "手で付けた名前" },
+  ];
+  const out = buildDigest(events, { jsonlPath: "x.jsonl", skipped: 0 });
+  assert.ok(out.includes("title: 手で付けた名前"));
+});
+
+test("buildDigest: custom-title が複数あれば最後の 1 件が採用される", () => {
+  const events = [
+    { type: "custom-title", customTitle: "古い名前" },
+    { type: "custom-title", customTitle: "新しい名前" },
+  ];
+  const out = buildDigest(events, { jsonlPath: "x.jsonl", skipped: 0 });
+  assert.ok(out.includes("title: 新しい名前"));
+});
+
+test("buildDigest: 名前を持つエントリが無ければ (unknown)", () => {
+  const out = buildDigest([{ type: "user" }], { jsonlPath: "x.jsonl", skipped: 0 });
+  assert.ok(out.includes("title: (unknown)"));
+});
+
 // ---- buildDigest 統合テスト (fixture 全種を対象に、各セクションの期待を固定する) ----
 
 test("buildDigest: fixture 全シグナルの主要セクションを検証する", () => {

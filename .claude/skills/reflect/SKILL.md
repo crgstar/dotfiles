@@ -105,7 +105,8 @@ extractor は `reflect-extract` CLI（setup.sh が `~/.local/bin/reflect-extract
 項目件数: <N>
 ```
 
-- 推奨先が提案のときは `提案: <target 絶対パス> (kind: <claude-md|skill|doc|permission|other>) — <title 一行>` の形で書く。書き込み案は `**書き込み案:**` ラベルの直後の行から「## 理由」「## 変更内容」の 2 節をそのまま書く（形は §6 REFLECT-PROPOSAL の本文と同じ。1 提案 1 変更）。
+- 推奨先が提案のときは `提案: <target 絶対パス> (kind: <claude-md|skill|doc|permission|other>) — <title 一行>` の形で書く。書き込み案は `**書き込み案:**` ラベルの直後の行から「## 経緯」「## 理由」「## 変更内容」の 3 節をそのまま書く（形は §6 REFLECT-PROPOSAL の本文と同じ。1 提案 1 変更）。
+- 「## 経緯」は**セッション名 + 会話の流れを 3〜4 文**で書く。セッション名は `reflect-extract digest` の `## session map` にある `title` を**そのまま引用する**（呼び名を自分で作らない。`(unknown)` のときだけ会話から短い呼び名を付ける）。続けて、どういう実装・調査の場面で、どういうやり取り（訂正・反復・拒否）が起きたかを書く。手順の再現・コード断片・詳細な経過は書かない（提案の中身は「## 変更内容」、因果は「## 理由」が持つ。経緯は朝のトリアージで「どの作業のときの話か」を思い出すためだけの節）。§2.4 の例外どおり固有名は汎用化しない。
 - 各項目は簡潔に書く。
 
 ### §2.3 拾うものが無いとき
@@ -115,6 +116,8 @@ extractor は `reflect-extract` CLI（setup.sh が `~/.local/bin/reflect-extract
 ### §2.4 サニタイズ
 
 **dotfiles 管理ファイル宛の項目**（提案の target・書き込み先が `~/dotfiles/` 配下＝PUBLIC リポに追跡されるもの。`~/.claude/CLAUDE.md` 宛も生成元が dotfiles なので含む）は、返却の前に「内容」「書き込み案」をサニタイズする。それ以外のローカル宛（memory・私有リポ宛の提案等）はサニタイズ不要。
+
+**例外: 書き込み案の「## 経緯」節はサニタイズしない**（固有名をそのまま残す）。経緯は gitignore 済みの提案ファイルに留まり、承認で公開リポへ載るのは title と「## 変更内容」だけ。かつ経緯の役目は「どの作業のときの話か」をビューアの人間に思い出させることなので、リポ名・作業対象を汎用化すると節そのものが機能しなくなる。この例外は「経緯の文面が title・変更内容・コミットメッセージのどれにも複写されない」構造に依存しているので、ビューア側がそれを変えるならこの規定も見直す。
 
 **何が漏洩に当たるか・残してよいものは `~/dotfiles/.claude/rules/sanitize-criteria.md` に従う**（監査側と同一基準）。取り除き方: 固有名（パス・リポ名・コード識別子）は役割プレースホルダや構造記述へ置換（`<作業リポ>`, "バリデーション関数" 等）、日付・セッション ID・チケット番号・社内 URL・クレデンシャル様リテラルは完全に除去。
 
@@ -204,10 +207,10 @@ extractor の返却を**一字一句そのまま**テキスト出力する（mai
 
 - `~/dotfiles/.local/reflect-proposals/pending/<YYYYMMDD>-<セッション ID (UUID) の先頭 8 文字>-<連番>.md` に保存する（連番は同一プレフィックスの既存ファイルと衝突しない次の番号）。
 - frontmatter を自分で付与する: `id`（ファイル名から `.md` を除いたもの）/ `status: pending` / `target` / `repo`（`~/dotfiles/` 配下なら `dotfiles`、`~/projects/<name>/` 配下なら `<name>`、それ以外は `other` — ドライバの導出規則と同じ）/ `kind` / `title` / `source: reflect-interactive` / `source_session` / `source_cwd` / `created`（今日の日付）/ `decided:`（空）/ `note: ""`。
-- 本文は書き込み案の「## 理由」「## 変更内容」をそのまま。変更内容の形は §6 REFLECT-PROPOSAL の規約に従う（before/after・append のフェンス、**1 提案 1 変更**）。
+- 本文は書き込み案の「## 経緯」「## 理由」「## 変更内容」をそのまま。変更内容の形は §6 REFLECT-PROPOSAL の規約に従う（before/after・append のフェンス、**1 提案 1 変更**）。
 - **target が `~/dotfiles/` 配下（PUBLIC 宛）のとき**は保存後にサニタイズ監査を行う:
   - `Agent` ツール（`subagent_type: sanitize-auditor`）に (1) 検査対象 = 提案の title + 「## 変更内容」セクション (2) 判定基準 = `~/dotfiles/.claude/rules/sanitize-criteria.md` の絶対パス、を渡す
-    - **Why title + 変更内容だけか:** 承認時に公開リポへ載るのはこの 2 つだけ。「## 理由」は gitignore 済みの提案ファイルに留まる
+    - **Why title + 変更内容だけか:** 承認時に公開リポへ載るのはこの 2 つだけ。「## 経緯」「## 理由」は gitignore 済みの提案ファイルに留まる
   - 判定に応じて frontmatter の `created:` 直後に `sanitized: pass` または `sanitized: flagged <理由>` を挿入する
   - flagged でも提案は残してよい（ビューアが自動処理対象外として止める）
 
@@ -279,6 +282,10 @@ target: <変更対象の絶対パス>
 kind: <claude-md | skill | doc | permission | other>
 title: <一行要約>
 ---
+## 経緯
+
+<セッション名（digest の title）+ どういう場面でどういうやり取りがあったか。§2.2 の書き方に従う>
+
 ## 理由
 
 <なぜこの変更が要るか。発生した事象 + 根本原因を簡潔に>
@@ -309,9 +316,10 @@ REFLECT-SUMMARY>>>
 `run-headless.sh` の再提案サイクル（設計書 `reflect-b-autoconsume-design.md` 決定13・13a）専用の呼び出し形。夜間 run の queue 処理の前、または手動即時実行 `--regenerate-only` から、pending の `status: regenerate` 1 件ごとに 1 回このモードで headless claude を起動する。§6 との差分だけ示す（示していない箇所は §6 と同じ。マーカー形式・フェンス規約・「1 提案 1 変更」等はすべて踏襲する）。
 
 - **入力**: transcript ファイルではなく、ドライバがプロンプト本文に直接埋め込む。埋め込まれる文脈は次の 2 つ:
-  1. **元提案ファイルの全文**（frontmatter を含む。`target` / `kind` / `title` / `note` / `## 理由` を含む）
+  1. **元提案ファイルの全文**（frontmatter を含む。`target` / `kind` / `title` / `note` / `## 経緯` / `## 理由` を含む）
   2. **target の現在の内容**（ドライバが読めた場合は全文。読めない・存在しない場合は「target 不在」である旨を明示したプレースホルダに置き換わる）
 - **やること**: 上記 2 つを踏まえ、元の変更内容がなぜ古くなったか（`note` の指摘・target 側の変化・hook エラー等）を汲み、target の現在の内容に対して素直に適用できる変更内容を作り直す。`target` / `kind` および `title` が指す大まかな意図は維持してよいが、`## 変更内容` は作り直してよい（前提が変わっているので、旧 before/after にこだわらない）
+  - **`## 経緯` は元提案のものを一字一句そのまま引き写す**。このモードで読めるのは元提案と target の現在の内容だけで、経緯の元になったセッションの transcript は手元に無い。作り直すと会話の裏付けのない作文になる
   - **`note` が非空なら、それが再提案を要求した理由そのものなので最優先の制約として扱う**（frontmatter 内だけでなくプロンプト末尾にも独立セクションで再掲される）。作り直した変更内容が指摘を満たしているか確認し、**指摘をどう反映したかを `## 理由` に 1 行書く**。note に反する内容は提案として成立しない。
   - **埋め込まれた 2 つの入力だけで判断がつかない場合は、勘で埋めず read-only additionalDirectories（`~/projects`・`~/dotfiles`）経由で target 周辺を調査してよい**。
 - **出力**: §6 の `REFLECT-PROPOSAL` ブロックをちょうど 1 個だけ返す。マーカー外に文章を一切置かない。`REFLECT-SUMMARY` 等の他マーカーは不要（このモードは 1 提案の作り直し専用で、memory・サマリの判断は行わない）。`id` / `supersedes` 等の frontmatter はここでも書かない（ドライバが付与する。§6 の frontmatter 規約と同じ）

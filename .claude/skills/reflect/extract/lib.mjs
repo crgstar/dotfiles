@@ -530,8 +530,22 @@ export function buildDigest(events, opts) {
   lines.push("");
 
   // session map
-  const aiTitles = events.filter((e) => e.type === "ai-title");
-  const title = aiTitles.length > 0 ? aiTitles[aiTitles.length - 1].aiTitle : "(unknown)";
+  // why custom-title を先に見る: セッション名は transcript に追記される制御行で、
+  // CLI の /resume 一覧は customTitle -> aiTitle の順に最後の 1 件を採用する。
+  // /rename や rename hook で名前が付いたセッションでは ai-title が生成されないため、
+  // ai-title だけを見ると title が (unknown) に落ちる。
+  // why jsonl から読む: 名前を取る公式手段 (statusline の session_name / Agent SDK の
+  // get_session_info / claude agents --json) はいずれも稼働中セッションか SDK 導入を
+  // 要求するが、reflect の対象は終了済みセッションの transcript。このエントリ形式は
+  // Claude Code の内部仕様でバージョン間非互換だと公式が明言しているので、読めなければ
+  // (unknown) に落として digest 全体は壊さない
+  const lastTitle = (type, key) => {
+    const hits = events.filter((e) => e.type === type && e[key]);
+    return hits.length > 0 ? hits[hits.length - 1][key] : null;
+  };
+  const title = lastTitle("custom-title", "customTitle")
+    ?? lastTitle("ai-title", "aiTitle")
+    ?? "(unknown)";
   const timestamped = events.filter((e) => e.timestamp);
   const first = timestamped[0]?.timestamp ?? "(none)";
   const last = timestamped[timestamped.length - 1]?.timestamp ?? "(none)";

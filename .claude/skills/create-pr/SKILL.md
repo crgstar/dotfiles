@@ -13,6 +13,7 @@ description: >
 ## Phase 1: ブランチと差分の確認
 
 - PR を作るブランチ (head) は **現在のブランチがデフォルト**。ユーザから別ブランチの指示があれば変更する。default branch 上ならどのブランチで作るかをユーザに確認する。
+- ブランチ名が差分の内容と合っているかも見る。作業対象が途中で変わって名前がズレていたら、push 前に `git branch -m` でのリネームを提案する (push 後はリモート追跡と PR の付け替えが要るため、ここが最も安い)。
 - base ブランチはリポジトリの default branch を既定とする。最初に取得して **ユーザに「base は X で進めます」と報告** する (リポによって `main` / `master` / `develop` 等が違うため):
   ```bash
   BASE=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')

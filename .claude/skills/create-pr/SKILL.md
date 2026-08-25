@@ -17,6 +17,7 @@ description: >
   ```bash
   BASE=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
   ```
+- base を default branch 以外にする必要がある場合（スタック PR の中間ブランチ等）、要否・分岐元・命名を 1 回の質問にまとめて確認し、結果を `$BASE` に反映する（分割すると往復が増える）
 - 並列実行:
   ```bash
   git status

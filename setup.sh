@@ -716,8 +716,9 @@ target_reflect() {
 #     Bash(cmd sub +helper *) → "cmd sub +helper *" (gws の helper 命名規約 `+read`/`+append` 等。
 #         先頭 cmd には `+` を許さない / 連続 `++` 不可 / sub-word のみ単独 `+` を許す)
 #   除外対象 (内部に `*` や `/` を含む複合パターンは bash glob として 1 セグメント
-#   照合できないので hook の責務外):
-#     Bash(git -C * status *) / Bash(xargs -n* ls *) / Bash(cat */.mirugit/*)
+#   照合できない。単語が `-` で始まるパターンは上の抽出正規表現の単語形に合わない。
+#   いずれも hook の責務外):
+#     Bash(cat */.mirugit/*) / Bash(xargs -n1 ls *) / Bash(xargs -0 grep *)
 #   静的 allow ⊇ hook 許容範囲 が build-time に保証されるので、2 箇所メンテによる
 #   drift を避ける。
 target_prefixes() {

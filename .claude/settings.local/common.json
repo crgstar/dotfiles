@@ -7,8 +7,7 @@
   "permissions": {
     "allow": [
       "Bash(git ls-files *)",
-      "Bash(git -C * ls-files *)",
-      "Bash(git -C * ls-files)"
+      "Bash(git -C ~/dotfiles ls-files *)"
     ],
     "ask": [
       "Bash(git push *)",
@@ -53,5 +52,10 @@
   },
   "model": "opus",
   "askUserQuestionTimeout": "never",
-  "effortLevel": "high"
+  "effortLevel": "medium",
+  "modelSettings": {
+    "claude-opus-5": {
+      "effortLevel": "high"
+    }
+  }
 }

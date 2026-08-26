@@ -42,7 +42,7 @@ hook handler には `if` フィールドで permission rule 構文の絞り込�
 
 ## segment-allow.sh の safe-prefix 自動同期
 
-`gh api ... | jq ...` のような複合コマンドは、Claude Code が `&&`/`||`/`;`/`|` で分割して各セグメントごとに静的 allow を判定する。1 つでも未許可セグメントがあると全体 ask に倒れるため、PermissionRequest hook (`.claude/hooks/segment-allow.sh`) が全セグメントを safe-prefix リストと照合し、すべて safe かつ `gh api` を 1 つ以上含むときだけ allow を返す。
+`gh api ... | jq ...` のような複合コマンドは、Claude Code が `&&`/`||`/`;`/`|` で分割して各セグメントごとに静的 allow を判定する。1 つでも未許可セグメントがあると全体 ask に倒れるため、PermissionRequest hook (`.claude/hooks/segment-allow.sh`) が全セグメントを safe-prefix リストと照合し、すべて safe かつ **hook が責務を負う対象 (`gh api` / `git -C`) を 1 つ以上含む**ときだけ allow を返す。
 
 safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` が `permissions.allow` から自動生成する:
 
@@ -50,7 +50,7 @@ safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` 
 - `Bash(cmd *)` → `cmd *`
 - `Bash(cmd:*)` → `cmd` と `cmd *` の 2 行 (Claude Code の `:*` セマンティクス)
 - `Bash(cmd sub *)` / `Bash(cmd sub:*)` → 多語サブコマンドにも対応 (`git status *` / `gh pr view *` 等)
-- 除外: 内部に `*` や `/` を含む複合パターン (`git -C * status *`, `xargs -n* ls *`, `cat */.mirugit/*`) — bash glob として 1 セグメント照合できないので hook の責務外
+- 除外: 内部に `*` や `/` を含む複合パターン (`cat */.mirugit/*`) と、単語が `-` で始まるパターン (`xargs -n1 ls *` / `xargs -0 grep *`) — bash glob として 1 セグメント照合できない・抽出正規表現の単語形に合わないので hook の責務外 (`gh api ... | xargs ...` は ask に落ちる)
 - `gh api` だけは hook 側で書き込みフラグの有無を判定する特別扱い（静的 allow には載せない）。argv をトークン分割し `-X* / --method* / -f* / -F* / --field* / --raw-field* / --input*` のどの prefix も含まないと確認できたときだけ safe とする（long form `--field` や連結形 `-XDELETE` / `-Ftitle=x` を正規表現では取りこぼすため、prefix 判定に倒している）
 - `gh api graphql` はさらに別扱い。参照クエリでも本文を `-f query=...` で渡すので上のフラグ判定では必ず ask に落ちるため、「セグメント全体に `mutation` が現れない」ことを条件に safe とする（GraphQL の書き込みは mutation operation 限定で、キーワード省略の shorthand `{...}` は spec 上 query 固定なので、この 1 語で読み書きを判別できる）。値を検査できない `--input` / `-F key=@file` / `-F key=@-` と、判定面を増やす `--method` は引き続き unsafe。`__type(name:"Mutation")` のような参照も巻き添えで ask になるが、false positive は安全側なので許容する
 - `split_segments` は NUL 区切りで返す。`-f query='<改行>...'` のようにセグメント自身が改行を含むケースがあり、改行区切りだと呼び出し側の `read -r` が 1 セグメントを分割してクエリ本文の断片を「未知のコマンド」と誤判定するため
@@ -63,9 +63,64 @@ safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` 
   - `gh api ... > /tmp/...` への保存（実運用で多用するため。リダイレクト先が /tmp 配下リテラルのときのみ）
   - 単語として現れる副作用の無いリダイレクト（`2>&1` の fd 複製と、`2>/dev/null` / `1>/dev/null` / `&>/dev/null` / `>/dev/null` の出力破棄）。ファイル生成もコマンド実行も伴わず、`/dev/null` は書き込みが常に捨てられる特殊デバイスなのでリダイレクト先の変動もない。単語境界を要求するので `&>file` / `2>file` / `>&1` / `2>/dev/nullx` / `12>/dev/null` は従来通り検出される。空白入り（`2>& 1` / `2> /dev/null`。bash では合法）と、他のファイルリダイレクトとの併用は読み飛ばさず ask に落ちる
 
+### git -C の構造判定 (`is_safe_git_c`)
+
+`git -C <path> <サブコマンド>` は静的 allow に載せない。`Bash(git -C * status)` の `*` は
+コマンド文字列全体に対する glob なので空白をまたぎ、
+`git -C /tmp -c core.fsmonitor='任意コマンド' status` にも一致してしまう
+(`core.fsmonitor` は status / diff / fetch / ls-files が index を更新する際に、
+`diff.external` は diff 実行時に、いずれも無条件で起動される。2026-08 実測)。
+Claude Code 自身も起動時に該当ルールを「サブコマンドより前のワイルドカードは
+差し込まれたオプションごと承認する」と警告する。パスを実値に固定しない限り
+glob では表現できないため、hook 側の構造判定に倒している。
+
+allow を返す条件は、トークン分割した結果が下記すべてを満たすとき:
+
+- 先頭トークンが素の `git` (`/usr/bin/git` / `command git` / `sudo git` は対象外)
+- 続くトークンが `-C` ＋ パスの **1 組だけ**。`-C` より前に何か来る形 (`git -c ... -C ...`)、
+  パス位置がオプションの形 (`git -C -c ...`)、連結形 (`-C/path`)、`-C` が 2 組はすべて落ちる
+- サブコマンドが `status` / `log` / `diff` / `show` / `branch` / `fetch` / `remote` / `blame` /
+  `rev-parse` / `ls-files` / `check-ignore` / `worktree` のいずれか。
+  `stash` は直後が `list` のときだけ (引数なしの `git stash` は変更の退避＝書き込みのため)。
+  **この集合は「読み取り専用」ではない** — `fetch` は ref/object を、`branch -D` は ref を、
+  `remote add` / `worktree add`・`remove` はリポジトリ構成を書き換える。それでも通すのは
+  `-C` なし版が静的 allow に載っているからで、追加の基準は「読み取り専用か」ではなく
+  「`-C` なし版が静的 allow にあるか」
+- クォート内に改行を含むセグメントは無条件で unsafe (`is_safe_sed` と同じ理由。
+  `tokenize_quoted` の出力が改行区切りなのでトークン境界がずれ、サブコマンド位置を誤読する)
+
+**サブコマンドより後ろのオプションは検査しない。** `--upload-pack` (任意コマンド実行)・
+`--output` (任意パス書き込み)・`--ext-diff` はいずれも危険だが、`-C` を含まない
+`Bash(git diff *)` / `Bash(git fetch *)` でも同様に通る (実測)。ここだけ絞ると同じ操作が
+`-C` の有無で通ったり通らなかったりする二重基準になるので、`-C` なし版と同水準に揃えている。
+後ろ側を締めるなら allow → ask の格上げ側 (PreToolUse の `escalate-unsafe-bash.sh`) の担当。
+なお git は設定によるフック機構を持つため、リポジトリ自身の `.git/config` に
+`diff.external` を書けばオプション無しの `git diff` でも任意コマンドが走る。
+permission ルールでこの経路は閉じられない。
+
+### ヘッドレスで必要な `git -C` は実パスで allow に残す
+
+PermissionRequest hook はヘッドレスで発火しない。`reflect` は
+`claude -p --permission-mode dontAsk` で動き `git -C ~/dotfiles ls-files ...` を実行するため、
+`Bash(git -C ~/dotfiles ls-files *)` だけ `settings.local/common.json` の allow に残している
+(パスが実値なので Claude Code の警告対象にもならない)。同種の必要が出たら、
+ワイルドカードではなく実パスで足すこと。
+
+ただしこの allow はパスの**表記**に一致するので、`reflect/SKILL.md` が
+`git -C ~/dotfiles ...` と書いている限りでしか当たらない。SKILL.md 側の表記を
+絶対パスや `$HOME/dotfiles` に変えると、ヘッドレスでは hook も効かず黙って
+スキル列挙が落ちる。片方を変えるときはもう片方も揃えること。
+
+### 同じ hook を複数の `if` で登録する
+
+`if` は 1 handler に 1 ルールしか書けないので、`segment-allow.sh` は
+`Bash(gh api *)` と `Bash(git -C *)` の 2 handler で登録している。
+対象を増やすときは handler を足す (`if` に `&&` やリストは書けない)。
+
 ### メンテ手順
 
 - 新たに `gh api ... | <cmd> ...` を素通ししたい → `Bash(<cmd> *)` を allow に追加 → `./setup.sh <env>` で prefix 再生成
+- `git -C` で新たなサブコマンドを通したい → `is_safe_git_c` のホワイトリストに追加 (静的 allow ではなく hook 側)
 - hook ロジック側の self-test: `bash .claude/hooks/segment-allow.sh --self-test`
 
 ## scratchpad-rm-allow.sh の許可条件

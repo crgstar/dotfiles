@@ -18,7 +18,7 @@ description: >
 
 ## この環境での固定値
 
-- **対象スキル**: `~/dotfiles/.claude/skills/` 配下で git 追跡されているスキル（`git -C ~/dotfiles ls-files '.claude/skills/*/SKILL.md'` で列挙）
+- **対象スキル**: `~/dotfiles/.claude/skills/` 配下で git 追跡されているスキル（`git -C ~/dotfiles ls-files '.claude/skills/*/SKILL.md'` で列挙。`~/dotfiles` の表記のまま実行する）
 - **提案の置き場**: `~/dotfiles/.local/reflect-proposals/pending/`（承認＝自動適用+コミットは提案ビューアが行う。スキル指摘もここへ流す）
 - **言語**: すべて日本語（提案本文・カテゴリ・サマリすべて）
 

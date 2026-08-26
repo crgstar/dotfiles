@@ -19,8 +19,8 @@
 #   静的 allow ⊇ hook 許容範囲 を build-time に保証する。
 #   `git -C * status *` のような複合パターンは抽出から除外している。
 #
-# Scope: gh api の auto-allow を担うフックでのみ使用する想定。
-# どんなに safe-prefix を満たしていても `gh api` を 1 つも含まない
+# Scope: gh api と `git -C <path> <ホワイトリスト済みサブコマンド>` の auto-allow を担う。
+# どんなに safe-prefix を満たしていても、この 2 つを 1 つも含まない
 # コマンドは passthrough し、静的ルールの ask 判定に委ねる。
 #
 # Usage:
@@ -377,6 +377,87 @@ is_safe_sed() {
   [ "$saw_n" = 1 ] && [ "$saw_script" = 1 ]
 }
 
+# `git -C <path> <ホワイトリスト済みサブコマンド> ...` を構造判定する。
+#
+# why 静的 allow ではなく hook で見るか:
+#   `Bash(git -C * status)` は glob 照合なので `*` が空白をまたぎ、
+#   `git -C /tmp -c core.fsmonitor='任意コマンド' status` にも一致する。
+#   core.fsmonitor は status / diff / fetch / ls-files が index を更新する際に、
+#   diff.external は diff の実行時に、いずれも無条件で起動される (実測)。
+#   パスを実値に固定しない限り glob ではこの差し込みを排除できず、
+#   Claude Code 自身も起動時に該当ルールを警告する。そこで allow から外し、
+#   「サブコマンドより前に `-C <path>` 以外のトークンが無い」ことを
+#   トークン単位で確認した上で hook が allow を返す。
+#
+# why サブコマンドより後ろのオプションは見ないか:
+#   `--upload-pack` / `--output` / `--ext-diff` は確かに危険だが、それは
+#   `-C` を含まない `Bash(git diff *)` 等でも同様に通る (実測)。ここだけ絞ると
+#   同じ操作が -C の有無で通ったり通らなかったりする二重基準になるので、
+#   -C なし版と同水準に揃える。後ろ側の緩和は PreToolUse (escalate-unsafe-bash.sh)
+#   の担当で、そちらは allow を ask に格上げする方向なので別途扱う。
+is_safe_git_c() {
+  local seg="$1"
+
+  # why トークン化前に改行を弾く: tokenize_quoted は改行を含むトークンでも
+  # 出力を改行区切りにするため、クォート内改行があるとトークン境界がずれて
+  # サブコマンド位置を誤読する (is_safe_sed と同じ罠)。
+  case "$seg" in
+    *$'\n'*) return 1 ;;
+  esac
+
+  local t first=1 saw_c=0 saw_path=0 sub='' subarg=''
+
+  while IFS= read -r t; do
+    if [ "$first" = 1 ]; then
+      first=0
+      # `/usr/bin/git` / `command git` / `sudo git` は対象外 (素の git だけを見る)。
+      [ "$t" = 'git' ] || return 1
+      continue
+    fi
+    if [ "$saw_c" = 0 ]; then
+      # -C 以外が先に来る形 (`git -c ...` / `git --exec-path=... -C ...`) は、
+      # 安全かを個別に判断できないので受理しない。`-C/path` の連結形もここで落ちる。
+      [ "$t" = '-C' ] || return 1
+      saw_c=1
+      continue
+    fi
+    if [ "$saw_path" = 0 ]; then
+      # `git -C -c core.pager=x status` のようにパス位置へオプションが来る形を弾く。
+      case "$t" in -*) return 1 ;; esac
+      saw_path=1
+      continue
+    fi
+    if [ -z "$sub" ]; then
+      sub="$t"
+      continue
+    fi
+    if [ -z "$subarg" ]; then
+      subarg="$t"
+    fi
+  done < <(tokenize_quoted "$seg")
+
+  [ "$saw_path" = 1 ] || return 1
+
+  # 許すサブコマンドは、静的 allow から外した `Bash(git -C * <sub>)` と同じ集合に限る
+  # (hook 化で許可範囲を広げない)。
+  # why 「読み取り専用」ではない: fetch は ref/object を、branch -D は ref を、
+  # remote add / worktree add|remove はリポジトリの構成そのものを書き換える。
+  # それでも通すのは、-C なし版 (`Bash(git fetch *)` 等) が静的 allow に載っており、
+  # -C の有無で同じ操作の可否が変わる二重基準を作らないため。追加するときの基準は
+  # 「読み取り専用か」ではなく「-C なし版が静的 allow にあるか」。
+  case "$sub" in
+    status|log|diff|show|branch|fetch|remote|blame|rev-parse|ls-files|check-ignore|worktree)
+      return 0
+      ;;
+    # 引数なしの `git stash` は変更の退避 (書き込み) なので list に限定する。
+    stash)
+      [ "$subarg" = 'list' ] && return 0
+      return 1
+      ;;
+  esac
+  return 1
+}
+
 # 単一セグメント（trim 済み前提）が safe-prefix に該当するか判定する。
 # 0: safe / 1: not safe
 is_safe_segment() {
@@ -446,6 +527,12 @@ is_safe_segment() {
       is_safe_sed "$seg" && return 0
       return 1
       ;;
+    # git -C も静的 allow には載せない (パスの位置にワイルドカードを置くと
+    # サブコマンド前へのオプション差し込みを排除できないため)。
+    'git -C '*)
+      is_safe_git_c "$seg" && return 0
+      return 1
+      ;;
   esac
 
   # それ以外は generated prefix list に対する glob match で判定。
@@ -460,11 +547,12 @@ is_safe_segment() {
   return 1
 }
 
-# コマンド全体を分解し、全セグメント safe かつ gh api を含むときだけ allow。
-# gh api を含まないコマンドは静的ルールに委譲（このフックの役割外）。
+# コマンド全体を分解し、全セグメント safe かつ「hook が責務を負う対象」
+# (gh api / git -C) を 1 つ以上含むときだけ allow。どちらも含まないコマンドは
+# 静的ルールに委譲する（このフックの役割外）。
 evaluate_command() {
   local cmd="$1"
-  local has_gh_api=0
+  local has_target=0
   local seg
 
   # SAFE_PREFIXES が未設定ならファイルから読む。self-test が事前に
@@ -478,15 +566,15 @@ evaluate_command() {
       return 1
     fi
     case "$seg" in
-      'gh api '*) has_gh_api=1 ;;
+      'gh api '*|'git -C '*) has_target=1 ;;
     esac
   done < <(split_segments "$cmd")
 
-  [ "$has_gh_api" = 1 ]
+  [ "$has_target" = 1 ]
 }
 
 emit_allow() {
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","message":"compound read-only: gh api (no write flags; graphql without mutation) + segments in safe-prefix list"}}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","message":"compound read-only: gh api (no write flags; graphql without mutation) / git -C <path> <allowlisted subcommand> + segments in safe-prefix list"}}}'
 }
 
 emit_passthrough() {
@@ -634,6 +722,42 @@ w /tmp/pwned'"
 1e rm -rf /tmp/x'"
   assert_unsafe 'sed スクリプト内改行 + s///w' "gh api repos/foo/bar/pulls/1 | sed -n '1p
 s/a/b/w /tmp/pwned'"
+
+  # git -C: サブコマンドより前が `-C <path>` だけのときに限り allow
+  assert_safe 'git -C 絶対パス status' 'git -C /Users/u/projects/foo status'
+  assert_safe 'git -C チルダ log' 'git -C ~/dotfiles log --oneline -5'
+  assert_safe 'git -C 引数なし diff' 'git -C /Users/u/projects/foo diff'
+  assert_safe 'git -C stash list' 'git -C /Users/u/projects/foo stash list'
+  assert_safe 'git -C worktree list' 'git -C /Users/u/projects/foo worktree list'
+  assert_safe 'git -C ls-files (クォート付きパターン)' "git -C ~/dotfiles ls-files '.claude/skills/*/SKILL.md'"
+  assert_safe 'git -C | head の複合' 'git -C /Users/u/projects/foo branch -a --sort=-committerdate | head -40'
+  assert_safe 'git -C && echo の複合' 'git -C /Users/u/projects/foo status && echo done'
+  assert_safe 'git -C と gh api の混在' 'git -C /Users/u/projects/foo status && gh api repos/foo/bar/pulls/1'
+  assert_safe 'git -C + 2>/dev/null' 'git -C /Users/u/projects/foo status 2>/dev/null'
+
+  # 起動時警告が指していた本体: サブコマンド前へのオプション差し込み
+  assert_unsafe 'git -C の後に -c 差し込み' "git -C /tmp -c core.fsmonitor='echo pwned' status"
+  assert_unsafe 'git -C の前に -c 差し込み' "git -c core.fsmonitor='echo pwned' -C /tmp status"
+  assert_unsafe 'git --exec-path 差し込み' 'git --exec-path=/tmp/fake -C /tmp status'
+  assert_unsafe 'git -C のパス位置がオプション' "git -C -c core.pager='sh -c x' status"
+  assert_unsafe 'git -C の連結形 (-C/path)' 'git -C/tmp status'
+  assert_unsafe 'git -C が 2 組' 'git -C /tmp -C /etc status'
+
+  # サブコマンドのホワイトリスト
+  assert_unsafe 'git -C push' 'git -C /Users/u/projects/foo push'
+  assert_unsafe 'git -C commit' 'git -C /Users/u/projects/foo commit -m x'
+  assert_unsafe 'git -C stash (list なし) は退避' 'git -C /Users/u/projects/foo stash'
+  assert_unsafe 'git -C サブコマンドなし' 'git -C /Users/u/projects/foo'
+  assert_unsafe 'git -C config は書き込み経路' 'git -C /Users/u/projects/foo config diff.external x'
+
+  # 素の git 以外・危険な連結
+  assert_unsafe 'sudo git -C' 'sudo git -C /tmp status'
+  assert_unsafe 'パス付き git -C' '/usr/bin/git -C /tmp status'
+  assert_unsafe 'git -C と rm の連結' 'git -C /tmp status && rm -rf /tmp/x'
+  assert_unsafe 'git -C とコマンド置換' 'git -C $(cat /tmp/p) status'
+  assert_unsafe 'git -C の引数に改行' "git -C /tmp log --grep='a
+b'"
+  assert_unsafe 'git -C 出力を任意パスへリダイレクト' 'git -C /tmp status > /Users/u/.zshrc'
 
   # gh api graphql: mutation を含まない参照クエリは -f query=... 付きでも allow
   assert_safe 'graphql introspection' "gh api graphql -f query='query { __type(name: \"ProjectV2SingleSelectField\") { fields { name type { name kind ofType { name } } } } }'"

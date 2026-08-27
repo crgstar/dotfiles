@@ -32,6 +32,13 @@ bindkey '^M' expand-abbreviation
 # Claude Code: ちらつき防止（alt-screen レンダリング）
 export CLAUDE_CODE_NO_FLICKER=1
 
+# Claude Code: GitHub MCP のアクセストークン
+# why: GitHub のリモート MCP サーバーは OAuth の動的クライアント登録に未対応で、
+#      Claude Code の OAuth では接続できないため Bearer トークンを渡す必要がある。
+#      MCP 設定 (~/.claude.json) は ${VAR} を展開するので、公開 dotfiles には変数名だけを
+#      載せ、実体は gh のログイン状態から都度取る
+export GITHUB_MCP_PAT="$(gh auth token 2>/dev/null)"
+
 # history
 HISTSIZE=50000
 SAVEHIST=50000

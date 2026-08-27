@@ -39,15 +39,28 @@ emit_deny() {
 passthrough() { printf '{}\n'; }
 
 # 先頭トークンを取り出す(純粋関数)。クォートとエスケープは tokenize_quoted が剥がす。
-first_token() { tokenize_quoted "$1" | head -1; }
+#
+# why `| head -1` を使わない: head は 1 行読んだ時点でパイプを閉じるので、
+# トークン出力がパイプバッファ (64KB) を超える長いコマンドでは tokenize_quoted の
+# printf が EPIPE で失敗する。`set -euo pipefail` 下ではそれがフック全体の
+# 異常終了 (exit 141・stdout 空) になり、判定が黙って消える。パラメータ展開で
+# 先頭行を切り出せばパイプ自体が要らない。
+first_token() {
+  local toks
+  toks="$(tokenize_quoted "$1")"
+  printf '%s' "${toks%%$'\n'*}"
+}
 
 # セグメントが `gh api ...` か(純粋関数)。
 # why 2 トークン目まで見る: `gh pr view` や `ghq` を巻き込まないため。
 is_gh_api_cmd() {
-  local toks t1 t2
+  local toks rest t1 t2
   toks="$(tokenize_quoted "$1")"
-  t1="$(printf '%s\n' "$toks" | head -1)"
-  t2="$(printf '%s\n' "$toks" | sed -n '2p')"
+  t1="${toks%%$'\n'*}"
+  # 2 行目以降。1 行しか無いときは ${toks#*\n} が toks そのものを返すので空に倒す。
+  rest="${toks#*$'\n'}"
+  [ "$rest" = "$toks" ] && rest=""
+  t2="${rest%%$'\n'*}"
   [ "$t1" = 'gh' ] && [ "$t2" = 'api' ]
 }
 

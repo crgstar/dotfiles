@@ -681,6 +681,8 @@ target_hooks() {
             "$HOME/.claude/hooks/scratchpad-rm-allow.sh"
   link_file "$DOTFILES_DIR/.claude/hooks/pr-comment-signature.sh" \
             "$HOME/.claude/hooks/pr-comment-signature.sh"
+  link_file "$DOTFILES_DIR/.claude/hooks/prefer-jq-over-python.sh" \
+            "$HOME/.claude/hooks/prefer-jq-over-python.sh"
 }
 
 target_statusline() {

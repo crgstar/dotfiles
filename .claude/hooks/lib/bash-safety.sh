@@ -160,3 +160,98 @@ has_dangerous_shape() {
 
   return 1
 }
+
+# クォート（' " `）とクォート外のエスケープを尊重して、コマンド文字列を
+# 「直前の区切り種別 + コマンド」の並びに分解する(純粋関数)。
+# 各レコードを "<sep>\t<command>" として NUL 区切りで出力する。
+#   first : 先頭要素 (直前に区切りが無い)
+#   pipe  : 単独の | で直前と繋がっている = 直前の標準出力が流れ込む
+#   other : ; && || & 改行 で区切られている = 出力は流れない
+#
+# Why segment-allow.sh の split_segments と別に持つ:
+#   あちらは「各セグメントが安全か」だけを見るので区切りの種類を捨てている。
+#   「直前のコマンドの出力を受け取っているか」を判定するには pipe と
+#   それ以外を区別する必要があり、戻り値の形が違う。既に動いている
+#   split_segments の出力契約を変えると全呼び出し側の回帰確認が要るため、
+#   用途の違う関数として並置する。
+#
+# Why NUL 区切り: 要素自身が改行を含みうる (`python3 -c "<改行>...<改行>"`)。
+#   改行区切りだと呼び出し側の read が 1 要素を割ってしまう。
+split_with_separator() {
+  local cmd="$1"
+  local i=0 len=${#cmd} ch next
+  local in_single=0 in_double=0 in_backtick=0
+  local seg="" sep="first" pending=""
+
+  _emit_rec() {
+    local t
+    t="${seg#"${seg%%[![:space:]]*}"}"
+    t="${t%"${t##*[![:space:]]}"}"
+    if [ -n "$t" ]; then
+      printf '%s\t%s\0' "$sep" "$t"
+      sep="$pending"
+    fi
+    # why 空要素では sep を進めない: `a ;<改行> b` のように区切りが連続すると
+    # 空セグメントが挟まる。そこで sep を消費すると、実際には | で繋がって
+    # いない b が pipe 扱いになりうる。
+    seg=""
+  }
+
+  while [ "$i" -lt "$len" ]; do
+    ch="${cmd:$i:1}"
+    next=""
+    [ $((i+1)) -lt "$len" ] && next="${cmd:$((i+1)):1}"
+
+    if [ "$in_single" = 1 ]; then
+      seg+="$ch"; [ "$ch" = "'" ] && in_single=0
+    elif [ "$in_double" = 1 ]; then
+      seg+="$ch"
+      if [ "$ch" = '\' ] && [ -n "$next" ]; then
+        seg+="$next"; i=$((i+1))
+      elif [ "$ch" = '"' ]; then
+        in_double=0
+      fi
+    elif [ "$in_backtick" = 1 ]; then
+      seg+="$ch"; [ "$ch" = '`' ] && in_backtick=0
+    else
+      case "$ch" in
+        "'") in_single=1; seg+="$ch" ;;
+        '"') in_double=1; seg+="$ch" ;;
+        '`') in_backtick=1; seg+="$ch" ;;
+        # why エスケープを 1 文字として持ち越す: `\|` はパイプではなくリテラル。
+        # 飛ばさないと区切りと誤読して、実際には 1 コマンドだったものを
+        # 2 要素に割ってしまう。
+        '\')
+          seg+="$ch"
+          if [ -n "$next" ]; then seg+="$next"; i=$((i+1)); fi
+          ;;
+        '|')
+          if [ "$next" = '|' ]; then
+            pending="other"; _emit_rec; i=$((i+1))
+          else
+            pending="pipe"; _emit_rec
+          fi
+          ;;
+        '&')
+          if [ "$next" = '&' ]; then
+            pending="other"; _emit_rec; i=$((i+1))
+          elif [ "${seg: -1}" = '>' ] || [ "${seg: -1}" = '<' ]; then
+            # why fd 複製 (`2>&1` / `<&3`) は区切りではない: 直前が > / < のときの
+            # & はリダイレクト先の指定なので、ここで割るとコマンドが切れて
+            # 「出力の出どころ」を見失う (gh api ... 2>&1 | ... が拾えなくなる)。
+            seg+="$ch"
+          else
+            pending="other"; _emit_rec
+          fi
+          ;;
+        ';'|$'\n')
+          pending="other"; _emit_rec
+          ;;
+        *) seg+="$ch" ;;
+      esac
+    fi
+    i=$((i+1))
+  done
+  pending="other"
+  _emit_rec
+}

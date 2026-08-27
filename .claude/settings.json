@@ -219,6 +219,10 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/pr-comment-signature.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/prefer-jq-over-python.sh"
           }
         ]
       }

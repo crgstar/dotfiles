@@ -259,7 +259,7 @@ auq-web リポ (~/projects/auq-web/): server 実体と起動 entry
 │   └── index.html / parser.py / wire.py
 └── skill/run.sh             ← ~/.local/bin/auq-web に link される wrapper
 
-dotfiles (~/dotfiles/.claude/skills/auq-web/): スキル本文 (他スキルと同じ管理)
+dotfiles (~/dotfiles/.claude/skills-global/auq-web/): スキル本文 (他スキルと同じ管理)
 ├── SKILL.md                 ← この file
 └── references/input-format.md
 ```
@@ -268,8 +268,8 @@ dotfiles (~/dotfiles/.claude/skills/auq-web/): スキル本文 (他スキルと�
 
 ```bash
 # SKILL.md / references を他スキルと同じく ~/.claude/skills/auq-web/ へ link
-link_file .../skills/auq-web/SKILL.md                 ~/.claude/skills/auq-web/SKILL.md
-link_file .../skills/auq-web/references/input-format.md ~/.claude/skills/auq-web/references/input-format.md
+link_file .../skills-global/auq-web/SKILL.md          ~/.claude/skills/auq-web/SKILL.md
+link_file .../skills-global/auq-web/references/input-format.md ~/.claude/skills/auq-web/references/input-format.md
 # run.sh を PATH に通す → `auq-web` で呼べる
 link_file ~/projects/auq-web/skill/run.sh             ~/.local/bin/auq-web
 ```

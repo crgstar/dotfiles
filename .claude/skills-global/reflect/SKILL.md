@@ -18,7 +18,7 @@ description: >
 
 ## この環境での固定値
 
-- **対象スキル**: `~/dotfiles/.claude/skills/` 配下で git 追跡されているスキル（`git -C ~/dotfiles ls-files '.claude/skills/*/SKILL.md'` で列挙。`~/dotfiles` の表記のまま実行する）
+- **対象スキル**: `~/dotfiles/.claude/skills-global/`（全リポへ配るもの）と `~/dotfiles/.claude/skills/`（このリポ専用）の両方で git 追跡されているスキル（`git -C ~/dotfiles ls-files '.claude/skills-global/*/SKILL.md' '.claude/skills/*/SKILL.md'` で列挙。`~/dotfiles` の表記のまま実行する）
 - **提案の置き場**: `~/dotfiles/.local/reflect-proposals/pending/`（承認＝自動適用+コミットは提案ビューアが行う。スキル指摘もここへ流す）
 - **言語**: すべて日本語（提案本文・カテゴリ・サマリすべて）
 
@@ -45,7 +45,7 @@ jsonl の解析・シグナル抽出・§2.4 サニタイズを `retro-extractor
 `retro-extractor` に渡すもの:
 
 - **セッション jsonl**: §1.2 で特定した絶対パス
-- **このファイル**: `~/dotfiles/.claude/skills/reflect/SKILL.md` の絶対パス（extractor の唯一の作業仕様。§2.1〜§2.7 を読ませる）
+- **このファイル**: `~/dotfiles/.claude/skills-global/reflect/SKILL.md` の絶対パス（extractor の唯一の作業仕様。§2.1〜§2.7 を読ませる）
 - **対象スキル一覧**: §1.1 の結果
 - **作業リポのルート**: 絶対 `pwd`（サニタイズ時に「これはこのリポ固有の名前だ」と気づく手がかり）
 - **既存 pending 提案の要約**（任意）: §1.3 で控えた title/target 一覧。同根候補を落とすために使う。0 件なら渡さない

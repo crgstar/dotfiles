@@ -16,7 +16,14 @@
 # 呼び出し側で env 上書きしたい場合 (self-test 等) は DOTFILES_SKILLS_DIR を
 # source 前にセットすればよい。
 _bash_safety_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
-DOTFILES_SKILLS_DIR="${DOTFILES_SKILLS_DIR:-${_bash_safety_self%/.claude/hooks/*}/.claude/skills}"
+_bash_safety_root="${_bash_safety_self%/.claude/hooks/*}"
+DOTFILES_SKILLS_DIR="${DOTFILES_SKILLS_DIR:-$_bash_safety_root/.claude/skills}"
+# why 2 箇所を見る: dotfiles のスキルは配布範囲で置き場が分かれる
+# (skills-global = 全リポへ配る / skills = このリポ専用)。実行時に現れるのは
+# 配布先の `~/.claude/skills/<name>/...` だが、その symlink の実体は
+# skills-global 側に落ちる。skills だけを正としていると、自前のスキル
+# スクリプトが「第三者」と判定されて毎回 ask になる。
+DOTFILES_SKILLS_GLOBAL_DIR="${DOTFILES_SKILLS_GLOBAL_DIR:-$_bash_safety_root/.claude/skills-global}"
 
 # クォート（' " `）を尊重しつつ空白で分割し、各トークンからクォート文字を
 # 剥がして1行ずつ出力する(純粋関数)。
@@ -86,13 +93,23 @@ tokenize_quoted() {
   _emit_tok
 }
 
+# $1 が $2 ディレクトリ配下かを判定する(純粋関数)。$2 が空なら常に偽。
+_is_under_dir() {
+  [ -n "$2" ] || return 1
+  case "$1" in "$2"/*) return 0 ;; esac
+  return 1
+}
+
 # find/curl/第三者スキル実行の危険形を判定する(純粋関数)。
 # 危険なら理由を stdout に出して 0、安全なら 1 を返す。
-# $2 (省略可) に dotfiles skills ディレクトリの絶対パスを渡す。省略時は
-# 本ライブラリが導出した DOTFILES_SKILLS_DIR を使う。空文字を明示すれば
-# 第三者スキル判定そのものを省略できる。
+# $2 / $3 (省略可) に dotfiles のスキルディレクトリ (project 用 / 配布用) の
+# 絶対パスを渡す。省略時は本ライブラリが導出した DOTFILES_SKILLS_DIR /
+# DOTFILES_SKILLS_GLOBAL_DIR を使う。$2 に空文字を明示すれば第三者スキル判定
+# そのものを省略できる (両方まとめて落ちる)。
 has_dangerous_shape() {
   local cmd="$1" skills_dir="${2-$DOTFILES_SKILLS_DIR}"
+  local skills_global_dir="${3-$DOTFILES_SKILLS_GLOBAL_DIR}"
+  [ -n "$skills_dir" ] || skills_global_dir=""
   local has_find=0 has_curl=0 has_shell=0
 
   [[ "$cmd" =~ (^|[[:space:]])find[[:space:]] ]] && has_find=1
@@ -146,13 +163,11 @@ has_dangerous_shape() {
         */.claude/skills/*)
           local real
           real="$(readlink -f "$t" 2>/dev/null || printf '%s' "$t")"
-          case "$real" in
-            "$skills_dir"/*) : ;;
-            *)
-              printf '第三者スキルスクリプトの実行: %s' "$t"
-              return 0
-              ;;
-          esac
+          if ! _is_under_dir "$real" "$skills_dir" \
+             && ! _is_under_dir "$real" "$skills_global_dir"; then
+            printf '第三者スキルスクリプトの実行: %s' "$t"
+            return 0
+          fi
           ;;
       esac
     done

@@ -38,7 +38,7 @@ hook handler には `if` フィールドで permission rule 構文の絞り込�
 
 - **`ask` は scope を跨いで `allow` に勝つ**。user settings の `ask: Bash(gh api *)` は、`--settings` でコマンド完全一致の allow を渡しても `dontAsk` 下で自動拒否される（配列 union で ask は消せない）。PermissionRequest hook も `-p` では発火しないため、**静的 ask に入っている操作をヘッドレスで通す方法はない**
 - **パス限定のファイルルールはマッチしない**。`Write(//abs/**)` / `Write(~/**)` / `Write(/abs/**)` のどれも `--settings` / `--allowedTools` 経由で効かなかった（パス指定なしの `Write` だけは効く）。パスを絞った書き込み許可は現状組めない
-- 上記により、無人実行でモデルに書き込み・送信をさせる設計は避け、**モデルは stdout で結果を返しドライバ（claude 外のスクリプト）が副作用を実行する**構成に倒す（例: `reflect` の outbox パターン。`.claude/skills/reflect/run-headless.sh`）
+- 上記により、無人実行でモデルに書き込み・送信をさせる設計は避け、**モデルは stdout で結果を返しドライバ（claude 外のスクリプト）が副作用を実行する**構成に倒す（例: `reflect` の outbox パターン。`.claude/skills-global/reflect/run-headless.sh`）
 
 ## segment-allow.sh の safe-prefix 自動同期
 

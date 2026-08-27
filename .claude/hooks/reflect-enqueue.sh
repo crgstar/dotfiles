@@ -1,7 +1,7 @@
 #!/bin/bash
 # SessionEnd hook: 終了したセッションの transcript を無人 reflect の処理待ち
 # キューに 1 行追記する。重い処理・ネットワークはしない (hook は速く返す)。
-# 処理本体は .claude/skills/reflect/run-headless.sh (launchd 起動) が担う。
+# 処理本体は .claude/skills-global/reflect/run-headless.sh (launchd 起動) が担う。
 #
 # why REFLECT_STATE_DIR を env で上書き可能にするか: --self-test が一時
 # ディレクトリで実キューを汚さずに検証するため。

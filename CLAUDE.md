@@ -60,7 +60,11 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
 
 - 設定ファイルは `link_file` 関数でシンボリックリンクする（コピーではない）
 - 新しいリンク対象を追加した場合は `setup.sh` の該当する `target_*` 関数に `link_file` の呼び出しを追加する。関数の外に置くと `--only` の部分実行から漏れる
-- スキルは `.claude/skills/<skill-name>/SKILL.md` に配置し、`~/.claude/skills/` へリンクする
+- スキルは用途で置き場所が分かれる。**どちらに置くかで配布範囲が決まる**ので、新規作成時にまず決める
+  - **全リポで使うもの** → `.claude/skills-global/<skill-name>/SKILL.md` に置き、`~/.claude/skills/<skill-name>/SKILL.md` へリンクする (user スコープ)
+  - **このリポ専用のもの** → `.claude/skills/<skill-name>/SKILL.md` に置き、`link_file` しない (project スコープ)。他リポで発火しても誤検知にしかならないスキルはこちら (例: `permission-triage` — hook や `permissions.allow` を触るのはこのリポだけ)
+  - project スキルの置き場所は Claude Code 側が `.claude/skills/` に固定しているので動かせない。分離のために動かせるのは配る側 (`skills-global`) だけ
+  - IMPORTANT: `.claude/skills/` にあるものを「`link_file` の書き忘れ」と判断しないこと。そこにあること自体が project 限定の意思表示
 - カスタムサブエージェントは `.claude/agents/<name>.md` に配置し、`~/.claude/agents/` へリンクする（user スコープ）。スキルが委譲する隔離処理 (生ログ・秘密の検査) や別コンテキストでのレビューを tools 制限付きで担わせる用途。判定基準は写経せず、呼び出し元 SKILL.md の該当節を Read させる (例: `retro-extractor` / `sanitize-auditor` / `doc-reviewer` / `skill-md-reviewer`)
 - 第三者リポのスキルは dotfiles に取り込まず、`~/.local/share/<name>/` に shallow clone してから `link_file` で配る (例: `mattpocock-skills` / `grill-me` / `grill-with-docs`)
 

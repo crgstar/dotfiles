@@ -383,7 +383,7 @@ target_bin() {
 
   # why: スキル本文から "reflect-extract" の短縮名で呼べるようにし、
   #      Bash(reflect-extract:*) の allow ルールだけで権限ダイアログを抑える
-  link_file "$DOTFILES_DIR/.claude/skills/reflect/extract/reflect-extract.mjs" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/reflect/extract/reflect-extract.mjs" \
             "$HOME/.local/bin/reflect-extract"
 }
 
@@ -521,9 +521,9 @@ target_claude_md() {
 }
 
 target_skills() {
-  link_file "$DOTFILES_DIR/.claude/skills/docbase-mermaid/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/docbase-mermaid/SKILL.md" \
             "$HOME/.claude/skills/docbase-mermaid/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/reflect/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/reflect/SKILL.md" \
             "$HOME/.claude/skills/reflect/SKILL.md"
   # why: スキルが委譲する専用サブエージェント。生ログ隔離 (retro-extractor)・漏洩監査
   #      (sanitize-auditor)・HTML ドキュメントレビュー (doc-reviewer)・SKILL.md 書き味レビュー
@@ -536,46 +536,46 @@ target_skills() {
             "$HOME/.claude/agents/doc-reviewer.md"
   link_file "$DOTFILES_DIR/.claude/agents/skill-md-reviewer.md" \
             "$HOME/.claude/agents/skill-md-reviewer.md"
-  link_file "$DOTFILES_DIR/.claude/skills/baton/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/baton/SKILL.md" \
             "$HOME/.claude/skills/baton/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/read-baton/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/read-baton/SKILL.md" \
             "$HOME/.claude/skills/read-baton/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/add-dir-manager/SKILL.md" \
             "$HOME/.claude/skills/add-dir-manager/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/add-dir-manager/scripts/addir.sh" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/add-dir-manager/scripts/addir.sh" \
             "$HOME/.claude/skills/add-dir-manager/scripts/addir.sh"
-  link_file "$DOTFILES_DIR/.claude/skills/skill-md-guide/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/skill-md-guide/SKILL.md" \
             "$HOME/.claude/skills/skill-md-guide/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/claude-md-guide/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/claude-md-guide/SKILL.md" \
             "$HOME/.claude/skills/claude-md-guide/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/claude-md-guide/references/anti-patterns.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/claude-md-guide/references/anti-patterns.md" \
             "$HOME/.claude/skills/claude-md-guide/references/anti-patterns.md"
-  link_file "$DOTFILES_DIR/.claude/skills/claude-md-guide/references/examples.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/claude-md-guide/references/examples.md" \
             "$HOME/.claude/skills/claude-md-guide/references/examples.md"
-  link_file "$DOTFILES_DIR/.claude/skills/explain/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/explain/SKILL.md" \
             "$HOME/.claude/skills/explain/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/explain/assets/template.html" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/explain/assets/template.html" \
             "$HOME/.claude/skills/explain/assets/template.html"
-  link_file "$DOTFILES_DIR/.claude/skills/write-shared-docs/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/write-shared-docs/SKILL.md" \
             "$HOME/.claude/skills/write-shared-docs/SKILL.md"
 
   # why: sentinel (多角レビュー) は入口スキル comment-scrutiny / implementation-review /
   #      test-design-guide に fan-out し、それらと sentinel 自身が
   #      shared/review-severity.md を共通参照する。スキル単体では完結しないので
   #      依存スキルと共有定義をまとめて配線する。evals は skill-creator 用の dev 資産。
-  link_file "$DOTFILES_DIR/.claude/skills/sentinel/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/sentinel/SKILL.md" \
             "$HOME/.claude/skills/sentinel/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/sentinel/evals/evals.json" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/sentinel/evals/evals.json" \
             "$HOME/.claude/skills/sentinel/evals/evals.json"
-  link_file "$DOTFILES_DIR/.claude/skills/comment-scrutiny/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/comment-scrutiny/SKILL.md" \
             "$HOME/.claude/skills/comment-scrutiny/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/implementation-review/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/implementation-review/SKILL.md" \
             "$HOME/.claude/skills/implementation-review/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/implement-from-wireframe/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/implement-from-wireframe/SKILL.md" \
             "$HOME/.claude/skills/implement-from-wireframe/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/test-design-guide/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/test-design-guide/SKILL.md" \
             "$HOME/.claude/skills/test-design-guide/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/shared/review-severity.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/shared/review-severity.md" \
             "$HOME/.claude/skills/shared/review-severity.md"
 
   # why: PR レビューの投稿・返信フロー。どちらも返信/指摘本文の末尾に署名を必須と
@@ -583,9 +583,9 @@ target_skills() {
   #      gh api を直接叩いた投稿」を ask に格上げしてこの規定を担保する。
   #      hook 側だけ dotfiles にあってスキル本体が外に残ると、規定の出典が
   #      公開リポから読めなくなるので揃えて管理する。
-  link_file "$DOTFILES_DIR/.claude/skills/review-comment/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/review-comment/SKILL.md" \
             "$HOME/.claude/skills/review-comment/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/respond-to-pr-review/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/respond-to-pr-review/SKILL.md" \
             "$HOME/.claude/skills/respond-to-pr-review/SKILL.md"
 
   # why: respond-to-pr-review の Phase 2 が採否判定と修正実装をこの 2 スキルへ
@@ -593,9 +593,9 @@ target_skills() {
   #      参照が解決できず手順が成立しないので、委譲元と揃えて管理する。
   #      evals は実データ (レビュー対象の差分・判定結果) を含むので取り込まず
   #      .agents 側に残す。sentinel も evals/evals.json だけを管理しているのと同じ扱い。
-  link_file "$DOTFILES_DIR/.claude/skills/review-verdict/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/review-verdict/SKILL.md" \
             "$HOME/.claude/skills/review-verdict/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/review-fix/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/review-fix/SKILL.md" \
             "$HOME/.claude/skills/review-fix/SKILL.md"
 
   # why: この 2 スキルの evals はレビュー対象の実データ (差分・判定結果・レビュー原本) を
@@ -620,9 +620,9 @@ target_skills() {
   # 旧構成 (~/.claude/skills/auq-web が repo/skill へのディレクトリ symlink) からの移行:
   #   ファイル単位 link に切り替えるため、残っていれば dir-symlink を除去する。
   [ -L "$HOME/.claude/skills/auq-web" ] && rm "$HOME/.claude/skills/auq-web"
-  link_file "$DOTFILES_DIR/.claude/skills/auq-web/SKILL.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/auq-web/SKILL.md" \
             "$HOME/.claude/skills/auq-web/SKILL.md"
-  link_file "$DOTFILES_DIR/.claude/skills/auq-web/references/input-format.md" \
+  link_file "$DOTFILES_DIR/.claude/skills-global/auq-web/references/input-format.md" \
             "$HOME/.claude/skills/auq-web/references/input-format.md"
   # why: server を起動する run.sh を `auq-web` として PATH に通す (SKILL.md は
   #   `auq-web ...` で呼ぶ)。auq-web リポが無いと壊れた symlink になるので、
@@ -661,9 +661,9 @@ target_skills() {
   # beat-copilot は create-pr の SKILL.md を Edit で更新する強依存があるため、
   # create-pr と同じ work gate に置く (home では create-pr が無く参照先を失う)。
   if [ "$HOST_ENV" = "work" ]; then
-    link_file "$DOTFILES_DIR/.claude/skills/create-pr/SKILL.md" \
+    link_file "$DOTFILES_DIR/.claude/skills-global/create-pr/SKILL.md" \
               "$HOME/.claude/skills/create-pr/SKILL.md"
-    link_file "$DOTFILES_DIR/.claude/skills/beat-copilot/SKILL.md" \
+    link_file "$DOTFILES_DIR/.claude/skills-global/beat-copilot/SKILL.md" \
               "$HOME/.claude/skills/beat-copilot/SKILL.md"
   fi
 }

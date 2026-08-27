@@ -13,7 +13,7 @@
     <array>
         <string>/bin/zsh</string>
         <string>-c</string>
-        <string>[ -f "$HOME/.config/reflect/env.local" ] &amp;&amp; source "$HOME/.config/reflect/env.local"; exec "$HOME/dotfiles/.claude/skills/reflect/run-headless.sh"</string>
+        <string>[ -f "$HOME/.config/reflect/env.local" ] &amp;&amp; source "$HOME/.config/reflect/env.local"; exec "$HOME/dotfiles/.claude/skills-global/reflect/run-headless.sh"</string>
     </array>
     <!-- 夜間 3:00 に 1 回。スリープ中に飛んだ回は復帰時に launchd が catch-up
          するが、電源オフ中の回はスキップされる (次の 3:00 まで処理されない) -->

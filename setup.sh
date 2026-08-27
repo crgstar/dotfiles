@@ -546,10 +546,6 @@ target_skills() {
             "$HOME/.claude/skills/add-dir-manager/scripts/addir.sh"
   link_file "$DOTFILES_DIR/.claude/skills/skill-md-guide/SKILL.md" \
             "$HOME/.claude/skills/skill-md-guide/SKILL.md"
-  # why: 許可ダイアログの切り分けはどのリポで作業していても要る。user スコープに
-  #      張らないと dotfiles を cwd にしたときだけ (project スキルとして) 拾われる。
-  link_file "$DOTFILES_DIR/.claude/skills/permission-triage/SKILL.md" \
-            "$HOME/.claude/skills/permission-triage/SKILL.md"
   link_file "$DOTFILES_DIR/.claude/skills/claude-md-guide/SKILL.md" \
             "$HOME/.claude/skills/claude-md-guide/SKILL.md"
   link_file "$DOTFILES_DIR/.claude/skills/claude-md-guide/references/anti-patterns.md" \

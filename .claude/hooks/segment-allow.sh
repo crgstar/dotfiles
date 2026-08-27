@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PermissionRequest hook helper:
-# Bash の複合コマンドを &&/||/;/| で分割し、各セグメントが
+# Bash の複合コマンドを &&/||/;/|/改行 で分割し、各セグメントが
 # safe-prefix に該当するときだけ allow を返す。1 つでも該当しない
 # セグメントがあれば `{}` を返して静的ルールに委譲する。
 #
@@ -63,7 +63,7 @@ trim() {
   printf '%s' "$s"
 }
 
-# クォート（' " `）を尊重しつつ &&, ||, ;, | で分割する。
+# クォート（' " `）を尊重しつつ &&, ||, ;, |, 改行 で分割する。
 # trim 済み・空文字を除いたセグメントを NUL 区切りで stdout に出す。
 # クォート内の演算子は分割されない。
 #
@@ -117,6 +117,19 @@ split_segments() {
         "'") in_single=1; seg+="$ch" ;;
         '"') in_double=1; bs_run=0; seg+="$ch" ;;
         '`') in_backtick=1; seg+="$ch" ;;
+        '\')
+          # why エスケープされた 1 文字を持ち越す: クォート外の `\` は次の 1 文字を
+          # リテラル化するので、そこに現れる改行は区切りではなく行継続になる。
+          # 分割してしまうと、実 bash では 1 コマンドの引数だったトークンが
+          # 独立セグメントとして safe prefix に照合され、素通りしうる。
+          # 次の文字ごと seg に残せば改行はセグメント内に留まり、
+          # has_unsafe_metachar がクォート外改行として unsafe に倒す。
+          seg+="$ch"
+          if [ -n "$next" ]; then
+            seg+="$next"
+            i=$((i+1))
+          fi
+          ;;
         '&')
           if [ "$next" = '&' ]; then
             _emit
@@ -133,7 +146,13 @@ split_segments() {
             _emit
           fi
           ;;
-        ';')
+        ';'|$'\n')
+          # why 改行を `;` と同列に置く: bash では改行はコマンド区切りそのもので、
+          # 区切りとして扱わないと複数行コマンドが 1 セグメントに潰れ、
+          # has_unsafe_metachar のクォート外改行チェックに当たって中身が
+          # 何であれ ask に倒れていた。分割してから 1 つずつ safe 判定する方が
+          # 判定は精密になる（緩むのではなく、各行が個別に白名簿を通る）。
+          # 行継続 `\<改行>` は上の '\' 分岐が食うのでここには来ない。
           _emit
           ;;
         *) seg+="$ch" ;;
@@ -148,8 +167,9 @@ split_segments() {
 # 0: 含む(危険) / 1: 含まない
 #
 # Why: 末尾 glob の prefix 照合はセグメント先頭のコマンド名しか守れない。
-#   split_segments が分割するのは &&/||/;/| だけなので、単一 & (バックグラウンド)・
-#   改行・$()・`` ` ``・サブシェル ()・入出力リダイレクト < > は 1 セグメント内に
+#   split_segments が分割するのは &&/||/;/|/改行 だけなので、単一 & (バックグラウンド)・
+#   行継続 `\<改行>` で持ち越されたクォート外改行・$()・`` ` ``・サブシェル ()・
+#   入出力リダイレクト < > は 1 セグメント内に
 #   残り、`echo *` 等の safe prefix にマッチして素通りしてしまう。
 #   例: `gh api foo & rm -rf ~` は 1 セグメントで `gh api ` 始まり扱いになる。
 #   これらを含むセグメントは prefix が何であれ unsafe に倒す（構造の白名簿化）。
@@ -235,6 +255,22 @@ has_unsafe_metachar() {
       case "$ch" in
         "'") in_single=1 ;;
         '"') in_double=1; bs_run=0 ;;
+        '\')
+          # why エスケープされた 1 文字を読み飛ばす: クォート外の `\` は次の 1 文字を
+          # リテラル化する。読み飛ばさないと `\"` / `\'` が擬似的なクォート区間を開き、
+          # その中の & > < ( ) が「クォート内だから安全」と誤判定されて素通りする。
+          # 例: `echo \"a&rm -rf ~` は bash では `echo "a` をバックグラウンド実行して
+          # `rm -rf ~` を走らせるが、`"` 以降をクォート内とみなすと `&` が見えず
+          # `echo *` に一致して allow に落ちていた。
+          # 逆にリテラル化された 1 文字は制御演算子になり得ないので、飛ばしても
+          # 検出漏れは生まれない。
+          if [ $((i+1)) -lt "$len" ]; then
+            # `\<改行>` だけは例外。split_segments が行継続として分割せず
+            # セグメント内に残す目印なので、ここで unsafe に倒して ask へ送る。
+            [ "${s:$((i+1)):1}" = $'\n' ] && return 0
+            i=$((i+1))
+          fi
+          ;;
         '$'|'`'|'&'|'('|')'|'<'|'>') return 0 ;;
         *) [ "$ch" = $'\n' ] && return 0 ;;
       esac
@@ -856,6 +892,30 @@ b'"
   assert_split_count 'split: quoted &&' 'echo "a && b" && gh api foo' 2
   assert_split_count 'split: 連続 ; は空セグメント抑制' 'echo a;; gh api foo' 2
   assert_split_count 'split: trailing ; は空セグメント抑制' 'gh api foo;' 1
+
+  # 改行はコマンド区切り (bash と同じ)。1 セグメントに潰さず個別に白名簿を通す。
+  assert_split_count 'split: 改行区切り' $'echo a\ngh api foo' 2
+  assert_split_count 'split: 連続改行は空セグメント抑制' $'echo a\n\ngh api foo' 2
+  assert_split_count 'split: && の直後の改行 (継続行)' $'echo a &&\ngh api foo' 2
+  assert_split_count 'split: クォート内改行は分割しない' $'gh api foo --jq \'.a\n.b\'' 1
+  assert_split_count 'split: 行継続 \<改行> は分割しない' $'gh api foo \\\n--jq .x' 1
+  assert_safe   '改行区切りの複合コマンド' $'gh api repos/foo/bar/pulls/1\necho done'
+  assert_safe   '改行とパイプの混在' $'gh api repos/foo/bar/pulls/1 | jq -r .title\necho done'
+  assert_safe   '改行 3 行 (gh api + echo + grep)' $'gh api repos/foo/bar/pulls/1\necho "=== hits ==="\ngrep -rn foo src/'
+  assert_unsafe '改行で rm が混ざる' $'gh api repos/foo/bar/pulls/1\nrm -rf /tmp/x'
+  assert_unsafe '改行で未収載コマンドが混ざる' $'gh api repos/foo/bar/pulls/1\npython3 -c "print(1)"'
+  assert_unsafe '行継続で書き込みフラグが続く' $'gh api repos/foo/bar/pulls/1 \\\n--method DELETE'
+
+  # クォート外の `\` はリテラル化なので、`\"` / `\'` で擬似クォート区間を開いて
+  # メタ文字を隠せてはならない (bash は `echo \"a` を background 実行して後続を走らせる)。
+  assert_unsafe 'エスケープ済み " が & を隠す'      'gh api repos/foo/bar/pulls/1 && echo \"a&rm -rf /tmp/x'
+  assert_unsafe 'エスケープ済み " が & を隠す(閉じ)' 'gh api repos/foo/bar/pulls/1 && echo \"a&rm -rf /tmp/x\"'
+  assert_unsafe "エスケープ済み ' が & を隠す"      "gh api repos/foo/bar/pulls/1 && echo \\'a&rm -rf /tmp/x"
+  assert_unsafe 'エスケープ済み " が > を隠す'      'gh api repos/foo/bar/pulls/1 && echo \"a>/tmp/pwned'
+  assert_unsafe 'エスケープ済み " が $( を隠す'     'gh api repos/foo/bar/pulls/1 && echo \"a$(id)'
+  # 逆に、リテラル化された 1 文字そのものは制御演算子ではないので allow のままでよい。
+  assert_safe   'エスケープされた空白はセグメントを割らない' 'git -C /re\ po status'
+  assert_safe   'エスケープされた ; は区切りではない'        $'gh api repos/foo/bar/pulls/1\necho a\\;b'
 
   if [ "$fail" = 0 ]; then
     printf '\nall tests passed.\n'

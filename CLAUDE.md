@@ -42,6 +42,8 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
 ### MCP サーバー設定
 
 - `.claude/settings.local/<env>.json` の `mcpServers` を、setup.sh が jq で `~/.claude.json` の `mcpServers` に直接マージする（他の3つと異なりシンボリックリンクではなく `~/.claude.json` そのものを上書き。conflict 確認ダイアログもなし）
+- マージはサーバ単位の**置換**（jq の `+`）。dotfiles 側のエントリが唯一の正で、そこから消したフィールドは `~/.claude.json` からも消える。再帰マージ（`*`）だとキーを足せても消せず、削除したはずの設定が残り続けるため
+- `.claude/mcp/` 配下のスクリプトは `~/.claude/mcp/` にリンクされる。トークン等を環境変数ではなく接続時に生成する `headersHelper` の実体を置く場所（環境変数だと Claude Code が起動する全子プロセスへ配られ、`env` の出力からモデルのコンテキストへ流入しうる）
 
 - IMPORTANT: ルールや設定を追加・削除した場合は毎回 `./setup.sh <env>` を実行してマージ結果を更新する
   - 2回目以降は `basename "$(readlink ~/.zshrc.local)" .zsh` で現在の env を判定できる

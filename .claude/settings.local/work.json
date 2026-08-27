@@ -128,9 +128,7 @@
     "github": {
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer ${GITHUB_MCP_PAT}"
-      }
+      "headersHelper": "~/.claude/mcp/github-auth-headers.sh"
     }
   }
 }

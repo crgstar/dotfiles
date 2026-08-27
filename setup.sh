@@ -19,7 +19,7 @@ TARGETS=(
   "statusline:statusLine ラッパと RunCat Neo 用スナップショット生成のリンク"
   "reflect:reflect 無人実行 (SessionEnd hook + launchd 夜間ドライバ)"
   "prefixes:segment-allow.prefixes を permissions.allow から再生成 (claude-settings の後)"
-  "mcp:settings.local/<env>.json の mcpServers を ~/.claude.json へマージ"
+  "mcp:mcp/ 配下のヘルパーをリンクし、settings.local/<env>.json の mcpServers を ~/.claude.json へマージ"
 )
 
 usage() {
@@ -750,6 +750,10 @@ target_prefixes() {
 }
 
 target_mcp() {
+  # why: mcpServers の headersHelper がこのパスを指すので、設定のマージより先に張る
+  link_file "$DOTFILES_DIR/.claude/mcp/github-auth-headers.sh" \
+            "$HOME/.claude/mcp/github-auth-headers.sh"
+
   if [ -f "$HOME/.claude.json" ] && command -v jq &> /dev/null; then
     if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/.claude/settings.local/$HOST_ENV.json" ]; then
       # $HOST_ENV.json から mcpServers を抽出
@@ -760,9 +764,16 @@ target_mcp() {
         echo ""
         echo "MCP サーバー設定をマージしています..."
 
-        # .claude.json の mcpServers セクションにマージ
+        # .claude.json の mcpServers セクションにマージ。
+        # why `+` (サーバ単位の置換) で `*` (再帰マージ) ではない: `*` はキーを
+        # 足すだけで消せないので、dotfiles 側からフィールドを削除しても既存
+        # ~/.claude.json に古い値が残り続ける。実例として `headers` を
+        # `headersHelper` へ移したとき、消えない `Authorization: Bearer ${VAR}` が
+        # 未定義の変数を展開して空の Bearer を送り HTTP 400 になる。dotfiles の
+        # エントリを唯一の正とし、管理外のサーバ (別ツールが書いたもの) は
+        # トップレベルのキーが違うのでそのまま残る。
         jq --argjson new_servers "$mcp_servers" \
-           '.mcpServers = (.mcpServers // {}) * $new_servers' \
+           '.mcpServers = (.mcpServers // {}) + $new_servers' \
            "$HOME/.claude.json" > "$HOME/.claude.json.tmp"
 
         mv "$HOME/.claude.json.tmp" "$HOME/.claude.json"

@@ -47,9 +47,9 @@ hook handler には `if` フィールドで permission rule 構文の絞り込�
 safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` が `permissions.allow` から自動生成する:
 
 - `Bash(cmd)` → `cmd` (exact)
-- `Bash(cmd *)` → `cmd *`
+- `Bash(cmd *)` → `cmd` と `cmd *` の 2 行。**bare 側を落とさないこと**: Claude Code の静的 allow は `Bash(head *)` で引数なしの `head` も通す（2026-08 実測）が、bash glob の `head *` は「空白 + 1 文字以上」を要求して bare に一致しない。bare を落とすと hook だけが静的 allow より狭くなり、`gh api ... | head` のようにパイプ末尾へ引数なしで置いた道具 (`head` / `cat` / `sort` / `uniq` / `pwd` 等) が未知セグメント扱いになって、コマンド全体が ask に落ちる
 - `Bash(cmd:*)` → `cmd` と `cmd *` の 2 行 (Claude Code の `:*` セマンティクス)
-- `Bash(cmd sub *)` / `Bash(cmd sub:*)` → 多語サブコマンドにも対応 (`git status *` / `gh pr view *` 等)
+- `Bash(cmd sub *)` / `Bash(cmd sub:*)` → 多語サブコマンドにも対応 (`git status *` / `gh pr view *` 等)。こちらも bare (`git status`) と starred の 2 行
 - 除外: 内部に `*` や `/` を含む複合パターン (`cat */.mirugit/*`) と、単語が `-` で始まるパターン (`xargs -n1 ls *` / `xargs -0 grep *`) — bash glob として 1 セグメント照合できない・抽出正規表現の単語形に合わないので hook の責務外 (`gh api ... | xargs ...` は ask に落ちる)
 - `gh api` だけは hook 側で書き込みフラグの有無を判定する特別扱い（静的 allow には載せない）。argv をトークン分割し `-X* / --method* / -f* / -F* / --field* / --raw-field* / --input*` のどの prefix も含まないと確認できたときだけ safe とする（long form `--field` や連結形 `-XDELETE` / `-Ftitle=x` を正規表現では取りこぼすため、prefix 判定に倒している）
 - `gh api graphql` はさらに別扱い。参照クエリでも本文を `-f query=...` で渡すので上のフラグ判定では必ず ask に落ちるため、「セグメント全体に `mutation` が現れない」ことを条件に safe とする（GraphQL の書き込みは mutation operation 限定で、キーワード省略の shorthand `{...}` は spec 上 query 固定なので、この 1 語で読み書きを判別できる）。値を検査できない `--input` / `-F key=@file` / `-F key=@-` と、判定面を増やす `--method` は引き続き unsafe。`__type(name:"Mutation")` のような参照も巻き添えで ask になるが、false positive は安全側なので許容する
@@ -127,6 +127,7 @@ PermissionRequest hook はヘッドレスで発火しない。`reflect` は
 - 新たに `gh api ... | <cmd> ...` を素通ししたい → `Bash(<cmd> *)` を allow に追加 → `./setup.sh <env>` で prefix 再生成
 - `git -C` で新たなサブコマンドを通したい → `is_safe_git_c` のホワイトリストに追加 (静的 allow ではなく hook 側)
 - hook ロジック側の self-test: `bash .claude/hooks/segment-allow.sh --self-test`
+- 派生規則側の self-test: `./setup.sh --self-test` (設定は書き換えない)。hook 側の self-test は SAFE_PREFIXES を自前で手書きしており実際の派生結果を見ないので、この 2 本は別物として両方回す。片方だけだと「hook だけが静的 allow より狭い」状態が緑で通る
 
 ## scratchpad-rm-allow.sh の許可条件
 

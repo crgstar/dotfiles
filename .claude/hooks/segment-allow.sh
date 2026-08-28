@@ -640,17 +640,29 @@ run_self_test() {
     'echo *'
     'printf'
     'printf *'
+    # ` *` 由来 → bare と starred の両方を派生させる (Claude Code の静的 allow は
+    # `Bash(head *)` で引数なしの head も通すので、bare を落とすと hook だけが狭くなる)
+    'jq'
     'jq *'
+    'head'
     'head *'
+    'tail'
     'tail *'
+    'grep'
     'grep *'
+    'wc'
     'wc *'
+    'ls'
     'ls *'
+    'cat'
     'cat *'
     'env'
     # 多語サブコマンド (Bash(git status *) 等の派生)
+    'git status'
     'git status *'
+    'git log'
     'git log *'
+    'gh pr view'
     'gh pr view *'
     # `:*` セマンティクス → "cmd" と "cmd *" の両方を派生させる
     'mkdir'
@@ -692,6 +704,11 @@ run_self_test() {
   assert_safe 'gh api | jq' "gh api repos/foo/bar/pulls/1/comments | jq '.[] | .id'"
   assert_safe 'gh api | jq -r' "gh api repos/foo/bar/pulls/1 | jq -r '.title'"
   assert_safe 'gh api | head' 'gh api repos/foo/bar/pulls/1 | head -5'
+  # パイプ末尾に引数なしで置く道具 (` *` 由来の bare)。glob "head *" は空にマッチしないので、
+  # setup.sh が bare を派生させないと ここが passthrough に落ちる
+  assert_safe 'gh api | head (引数なし)' 'gh api repos/foo/bar/pulls/1 | head'
+  assert_safe 'gh api | grep | head (引数なし)' "gh api repos/foo/bar/pulls/1 | grep -i x | head"
+  assert_safe 'gh api && git status (引数なし多語)' 'gh api repos/foo/bar/pulls/1 && git status'
   assert_safe 'gh api | jq | head' "gh api repos/foo/bar/pulls/1 | jq '.[]' | head -5"
   assert_safe 'gh api | wc -l' 'gh api repos/foo/bar/pulls/1 | wc -l'
   assert_safe 'env (引数なし) を含む' 'env && gh api repos/foo/bar/pulls/1'
@@ -711,6 +728,8 @@ run_self_test() {
   assert_safe '2>&1 単体' 'gh api repos/foo/bar/pulls/1 2>&1'
   assert_safe '2>&1 | head' 'gh api repos/foo/bar/pulls/1 2>&1 | head -c 2000'
   assert_safe '2>&1 が gh api 以外のセグメントに付く' 'echo start 2>&1 && gh api repos/foo/bar/pulls/1'
+  # bare を派生させるのは safe リストに載っている語だけ。未収載の語は引数の有無に関わらず落とす
+  assert_unsafe 'safe リストに無い bare コマンド' 'gh api repos/foo/bar/pulls/1 | xargs'
   assert_unsafe '2>&1 の後に & が続く' 'gh api repos/foo/bar/pulls/1 2>&1 & rm -rf /tmp/x'
   assert_unsafe '2>&1 とファイル書き込みの併用' 'gh api repos/foo/bar/pulls/1 2>&1 > /home/user/.zshrc'
   assert_unsafe '&> は全出力のファイル書き込み' 'gh api repos/foo/bar/pulls/1 &> /tmp/x'

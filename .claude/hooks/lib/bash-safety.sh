@@ -158,10 +158,25 @@ has_dangerous_shape() {
 
   # 3. bash/sh が実行する第三者スキルスクリプト
   if [ "$has_shell" = 1 ]; then
+    # why cd の有無を先に見る: 相対パスの readlink -f は「この hook プロセスの cwd」
+    # で解決するが、`cd <dir> && bash ./.claude/skills/<name>/<file>` のように同一
+    # コマンド内で cwd が動くと、解決先と実際に実行されるファイルが別物になる。
+    # dotfiles 側に同名パスが実在すると第三者スクリプトが「dotfiles 製」と誤判定
+    # されて素通しする (`Bash(cd *)` と `Bash(bash */.claude/skills/*)` が両方
+    # 静的 allow なので、確認ダイアログも出ない)。cwd が動くコマンドでは実体を
+    # 解決できないものとして ask に倒す。
+    local has_cd=0 tt
+    for tt in "${toks[@]}"; do
+      if [ "$tt" = 'cd' ]; then has_cd=1; break; fi
+    done
     for t in "${toks[@]}"; do
       case "$t" in
         */.claude/skills/*)
           local real
+          if [ "$has_cd" = 1 ] && [ "${t#/}" = "$t" ]; then
+            printf 'cd を含むコマンド内の相対パススキル実行 (実体を解決できない): %s' "$t"
+            return 0
+          fi
           real="$(readlink -f "$t" 2>/dev/null || printf '%s' "$t")"
           if ! _is_under_dir "$real" "$skills_dir" \
              && ! _is_under_dir "$real" "$skills_global_dir"; then

@@ -11,6 +11,7 @@
       "Bash(grep *)",
       "Bash(wc *)",
       "Bash(pwd *)",
+      "Bash(cd *)",
       "Bash(head *)",
       "Bash(tr *)",
       "Bash(sort *)",

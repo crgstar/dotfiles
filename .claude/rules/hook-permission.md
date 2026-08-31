@@ -48,6 +48,8 @@ safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` 
 
 - `Bash(cmd)` → `cmd` (exact)
 - `Bash(cmd *)` → `cmd` と `cmd *` の 2 行。**bare 側を落とさないこと**: Claude Code の静的 allow は `Bash(head *)` で引数なしの `head` も通す（2026-08 実測）が、bash glob の `head *` は「空白 + 1 文字以上」を要求して bare に一致しない。bare を落とすと hook だけが静的 allow より狭くなり、`gh api ... | head` のようにパイプ末尾へ引数なしで置いた道具 (`head` / `cat` / `sort` / `uniq` / `pwd` 等) が未知セグメント扱いになって、コマンド全体が ask に落ちる
+- **auto mode の分類器が通すコマンドも allow に書く**: auto mode 下では `cd` / `awk` / `basename` のように allow 外でも確認なしで通るものがある (2026-08 実測)。だが safe-prefix は `permissions.allow` からしか生成されないので hook には未知セグメントに見え、`cd <path> && gh api ...` だけが ask に落ちる。足してよいのはコマンド実行もファイル書き込みも持たないものだけ (`cd` は可。`awk` は `system()` / `> file` を持つので不可。`sed` と同様に hook 側の構造判定を書くまで allow には載せない)
+  - 判定基準は「実行と書き込みを持たないか」だけでは足りない。**他の hook がパス解決に使う前提を壊さないか**も見る。`cd` は自身は無害だが後続セグメントの相対パスの意味を変えるので、`escalate-unsafe-bash.sh` が `bash */.claude/skills/*` の実体を `readlink -f` で確かめる判定と噛み合わず、`cd <第三者ディレクトリ> && bash ./.claude/skills/<name>/<file>` が「dotfiles 製スキル」と誤判定されて素通りしていた。`lib/bash-safety.sh` 側で「`cd` を含むコマンド内の相対パスは解決不能として ask」に倒して塞いである
 - `Bash(cmd:*)` → `cmd` と `cmd *` の 2 行 (Claude Code の `:*` セマンティクス)
 - `Bash(cmd sub *)` / `Bash(cmd sub:*)` → 多語サブコマンドにも対応 (`git status *` / `gh pr view *` 等)。こちらも bare (`git status`) と starred の 2 行
 - 除外: 内部に `*` や `/` を含む複合パターン (`cat */.mirugit/*`) と、単語が `-` で始まるパターン (`xargs -n1 ls *` / `xargs -0 grep *`) — bash glob として 1 セグメント照合できない・抽出正規表現の単語形に合わないので hook の責務外 (`gh api ... | xargs ...` は ask に落ちる)

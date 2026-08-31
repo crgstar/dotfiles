@@ -151,6 +151,15 @@ run_self_test() {
   assert_dirs '配布スキル (skills-global 実体) は素通し' "bash $tmp/.claude/skills/global.sh" pass
   assert_dirs 'project スキル (skills 実体) は素通し'    "bash $tmp/.claude/skills/project.sh" pass
   assert_dirs '実体が dotfiles 外なら ask'               "bash $tmp/.claude/skills/third.sh"   ask
+  # cd で cwd が動くコマンド内の相対パスは、この hook の cwd 基準で解決すると
+  # 実際に実行されるファイルとずれる。dotfiles 内に同名パスが実在すると
+  # 第三者スクリプトが素通しするため、解決不能として ask に倒す。
+  assert_dirs 'cd + 相対パスは実体を解決できないので ask' \
+    "cd /opt/other && bash ./.claude/skills/global.sh" ask
+  assert_dirs 'cd があってもパスが絶対なら実体で判定'      \
+    "cd /opt/other && bash $tmp/.claude/skills/global.sh" pass
+  assert_dirs 'cd が無ければ相対パスは従来どおり解決'      \
+    "bash ./.claude/skills/does-not-exist.sh" ask
   rm -rf "$tmp"
 
   if [ "$fail" = 0 ]; then

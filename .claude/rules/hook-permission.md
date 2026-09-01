@@ -161,3 +161,34 @@ self-test: `bash .claude/hooks/scratchpad-rm-allow.sh --self-test`
 `gh api` 以外の投稿経路（`gh pr comment` / `gh pr review` / `gh issue comment`）は現状カバーしていない。
 
 self-test: `bash .claude/hooks/pr-comment-signature.sh --self-test`
+
+## memory-guide-gate.sh の差し戻し条件
+
+メモリ (`~/.claude/projects/<slug>/memory/` 配下の `*.md` と `MEMORY.md` 索引) への書き込みを、
+セッション内で最初の 1 回だけ deny し、`memory-guide` スキルの起動をモデルに促す
+PreToolUse hook。`prefer-jq-over-python.sh` と同じく、deny の理由文だけがモデルに渡る性質を使って
+人間の手を止めずに差し戻す。
+
+**「起動済みか」は判定しない。** 検知手段がどれも取りこぼすため:
+
+- `transcript_path` の会話ログは非同期に書かれ、現在ターンの直近メッセージを含まないことがある
+  (公式明記)。grep 方式は誤 deny → 再起動 → また誤 deny のループになりうる
+- ユーザが `/memory-guide` と手で打った場合はプロンプト展開でスキル本文が載るだけで、
+  Skill ツール呼び出しが発生しない。Skill 呼び出しを見張る方式では印が付かず、
+  正しく読んでいるのに deny される
+
+代わりに「セッションにつき 1 回だけ立ち止まらせる」に割り切り、印ファイル
+(`${TMPDIR}/claude-memory-guide-gate/<session_id>`) の有無だけで判定する。
+印を置けないときは素通しに倒す (追跡できない以上、恒久 deny より安全)。対象は 2 通り:
+`session_id` が想定外の形でパスを組み立てられない場合と、`mkdir` / 書き込みが失敗する場合
+(TMPDIR が消えた・別ユーザ所有・容量不足)。後者で deny を返すと次回も印が無く、
+「セッションにつき 1 回」のはずの差し戻しがセッション中ずっと続いてメモリを書けなくなる。
+
+対象ツールは `Write` / `Edit` / `MultiEdit` / `NotebookEdit` に加えて **`Bash`**。auto mode では
+ファイル編集を heredoc や `sed` で行うよう指示されるため、ファイル編集ツールだけを見張ると素通りする。
+Bash 側の判定は「`.claude/projects/` と (`/memory/` or `MEMORY.md`) を含み、かつ
+`>` / `tee` / `cp` / `mv` / `rm` / `sed -i` のいずれかを含む」という粗い痕跡判定。任意のシェルコマンドの
+書き込み先は静的に決まらないので取りこぼしを減らす側に倒しており、メモリパスを引数に持つ読み取り
+コマンドを巻き込むことがある。差し戻しがセッション 1 回きりなので誤検知の代償は 1 往復で頭打ちになる。
+
+self-test: `bash .claude/hooks/memory-guide-gate.sh --self-test`

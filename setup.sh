@@ -564,6 +564,14 @@ target_skills() {
             "$HOME/.claude/skills/explain/assets/template.html"
   link_file "$DOTFILES_DIR/.claude/skills-global/write-shared-docs/SKILL.md" \
             "$HOME/.claude/skills/write-shared-docs/SKILL.md"
+  # why: memory-guide は memory-guide-gate.sh (PreToolUse) の deny 理由文が
+  #      名指しで起動を促す先。リンクが無いとモデルは案内どおり呼べず、
+  #      差し戻しに応じる手段が無くなる。tidy-memory は判定・書式の正本として
+  #      memory-guide を Read する側なので、片方だけ配ると手順が成立しない。
+  link_file "$DOTFILES_DIR/.claude/skills-global/memory-guide/SKILL.md" \
+            "$HOME/.claude/skills/memory-guide/SKILL.md"
+  link_file "$DOTFILES_DIR/.claude/skills-global/tidy-memory/SKILL.md" \
+            "$HOME/.claude/skills/tidy-memory/SKILL.md"
 
   # why: sentinel (多角レビュー) は入口スキル comment-scrutiny / implementation-review /
   #      test-design-guide に fan-out し、それらと sentinel 自身が
@@ -689,6 +697,8 @@ target_hooks() {
             "$HOME/.claude/hooks/pr-comment-signature.sh"
   link_file "$DOTFILES_DIR/.claude/hooks/prefer-jq-over-python.sh" \
             "$HOME/.claude/hooks/prefer-jq-over-python.sh"
+  link_file "$DOTFILES_DIR/.claude/hooks/memory-guide-gate.sh" \
+            "$HOME/.claude/hooks/memory-guide-gate.sh"
 }
 
 target_statusline() {

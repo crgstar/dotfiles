@@ -224,6 +224,19 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/prefer-jq-over-python.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/memory-guide-gate.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/memory-guide-gate.sh"
           }
         ]
       }

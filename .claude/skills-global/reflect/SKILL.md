@@ -216,7 +216,7 @@ extractor の返却を**一字一句そのまま**テキスト出力する（mai
 
 ### memory / ファイルの書き込み
 
-- memory は auto-memory 規約（`MEMORY.md` の index 更新含む）に従う。書き込み先ディレクトリは本セッションのシステムプロンプトが示す memory ディレクトリ。feedback memory は `**Why:**` `**How to apply:**` を付ける
+- memory は auto-memory 規約（`MEMORY.md` の index 更新含む）と `memory-guide` スキルの基準（保存判定・陳腐化しない書き方・書式）に従う。書き込み先ディレクトリは本セッションのシステムプロンプトが示す memory ディレクトリ。feedback memory は `**Why:**` `**How to apply:**` を付ける
 - CLAUDE.md / 既存ファイルは既存の章立てを尊重し、関連セクションに追記する。新しいトップレベル見出しを乱造しない
 - 相対日付 (「今週」「Thursday」) は絶対日付に変換してから保存する
 - **既存エントリとの重複チェックは書き込み前に必ず行う**。同趣旨のルールがすでにあるなら更新 (追補・具体化) に倒す

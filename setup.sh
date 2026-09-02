@@ -725,6 +725,189 @@ target_reflect() {
   fi
 }
 
+# cmux の automation socket を launchd 常駐から使える状態にする。
+#
+# why setup.sh が触る: 既定の cmuxOnly は「cmux ターミナル内で起動したプロセス」
+#   しか socket に通さないので、launchd 起動の watcher は必ず拒否される。しかも
+#   拒否応答はプレーンテキストで返り、CLI 側が JSON として解釈して
+#   "JSON text did not start with array or object" になるため原因が分からない。
+#   新しいマシンで踏み直す前提の罠なので、配線と同じ場所で面倒を見る。
+#
+# why 丸ごと書き直さない: cmux.json は JSONC で、初期状態はコメントアウトされた
+#   設定例が本体 (6KB 超) を占める。jq / python で parse → dump すると
+#   そのコメントが全部消える (実際に消した)。automation セクションごと無いときだけ
+#   開き波括弧の直後へテキストとして挿入し、他の行には触らない。
+#
+# why 既存の別値は上書きしない: off / password を意図して選んでいる場合に
+#   黙って緩めることになる。警告と手順の提示だけに留めて判断を残す。
+cmux_enable_automation_socket() {
+  local config="$HOME/.config/cmux/cmux.json"
+  local want="automation"
+  # why 手順はファイルと GUI で案内する: cmux-settings はスキル同梱スクリプトで
+  #   PATH に無い (実測)。実行できないコマンドを案内すると詰まる
+  local how_to="      $config の automation.socketControlMode を \"$want\" にする"
+  local how_to2="      (GUI なら Settings > Automation の socket control mode を Automation mode)"
+
+  if [ ! -f "$config" ]; then
+    echo "警告: $config が無いため socketControlMode を設定できません"
+    echo "      cmux を一度起動してから ./setup.sh <env> --only cmux-pill を再実行してください"
+    return
+  fi
+
+  # JSONC のコメントと末尾カンマを落として現在値だけを読む (ファイルは書き換えない)
+  #
+  # why 末尾カンマも落とす: cmux が生成するテンプレートは `"schemaVersion": 1,` の
+  #   直後に `}` が来る形で、JSONC では合法だが json.loads は拒否する。落とさないと
+  #   parse 失敗 → 現在値が読めない → 「キー無し」と誤判定して二重挿入しうる
+  #
+  # why セクション有無と値の有無を別の答えで返す: automation には socketPassword /
+  #   portBase 等の兄弟キーがあり、「セクションはあるが socketControlMode だけ無い」
+  #   が普通に起こる。これを「キー無し」と一括すると開き波括弧の直後に 2 つ目の
+  #   "automation" を挿入してしまい、JSON の後勝ちで挿入側が丸ごと無効化される
+  #   (= 何も効いていないのに「設定しました」と出る)
+  local current
+  current="$(python3 -c '
+import json, re, sys
+raw = open(sys.argv[1]).read()
+raw = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
+raw = re.sub(r"^\s*//.*$", "", raw, flags=re.M)
+raw = re.sub(r",(\s*[}\]])", r"\1", raw)
+try:
+    data = json.loads(raw)
+except Exception:
+    print("__unreadable__")
+    sys.exit(0)
+# 挿入して安全なのは「トップレベルが object で automation キー自体が無い」ときだけ。
+# それ以外の想定外の形 (トップレベルが object でない / automation が object でない) は
+# 挿入位置を保証できないので触らせない
+if not isinstance(data, dict):
+    print("__unreadable__")
+    sys.exit(0)
+if "automation" not in data:
+    print("__missing_section__")
+    sys.exit(0)
+section = data["automation"]
+if not isinstance(section, dict):
+    print("__unreadable__")
+    sys.exit(0)
+print(section.get("socketControlMode") or "")
+' "$config" 2>/dev/null)" || current="__unreadable__"
+
+  if [ "$current" = "$want" ]; then
+    return
+  fi
+
+  # why parse できないファイルには触らない: どのキーが既にあるか分からない状態で
+  # 挿入すると、二重定義になって「後勝ち」で意図と違う値が効きうる。
+  # なおテキスト上の "socketControlMode" 有無は判定に使わない —
+  # テンプレートはコメントで設定例を並べており、コメント内の 1 語に反応してしまう
+  if [ "$current" = "__unreadable__" ]; then
+    echo ""
+    echo "警告: $config の automation.socketControlMode を判定できませんでした。"
+    echo "      launchd 起動の cmux-pill-watcher を動かすには手動で設定してください:"
+    echo "$how_to"
+    echo "$how_to2"
+    echo ""
+    return
+  fi
+
+  # why セクションがあるのにキーだけ無い場合も触らない: 既存 automation の中へ
+  # テキスト挿入するには内側の波括弧位置と既存キーの末尾カンマを正しく扱う必要があり、
+  # コメント付き JSONC で機械的に当てられない。挿入位置を誤ると設定ごと壊す
+  if [ "$current" = "__missing_section__" ]; then
+    : # セクションごと無い = 開き波括弧の直後に足しても二重定義にならない (下で挿入)
+  elif [ -z "$current" ]; then
+    echo ""
+    echo "警告: $config に automation セクションはありますが socketControlMode がありません。"
+    echo "      既存セクションを壊さないため自動では追記しません。手動で設定してください:"
+    echo "$how_to"
+    echo "$how_to2"
+    echo ""
+    return
+  else
+    echo ""
+    echo "警告: cmux の automation.socketControlMode が '$current' です。"
+    echo "      この値では launchd 起動の cmux-pill-watcher は socket に接続できません"
+    echo "      (既定の cmuxOnly も同じ)。意図的な設定を上書きしないので手動で変えてください:"
+    echo "$how_to"
+    echo "$how_to2"
+    echo ""
+    return
+  fi
+
+  # why 書き換え前に .bak: 全文書き戻し (open(path,"w")) なので途中で失敗すると
+  # 6KB のテンプレートごと失う。cmux 自身のエージェント向け手順も
+  # 「編集前にタイムスタンプ付き .bak を取れ」と明示している (cmux docs settings)
+  cp "$config" "$config.$(date +%Y%m%d%H%M%S).bak"
+
+  # automation セクションごと無い: 開き波括弧の直後に挿入する。sed ではなく python なのは、
+  # 「最初の { の直後だけ」を 1 回で当てるため
+  if python3 -c '
+import sys
+path, want = sys.argv[1], sys.argv[2]
+raw = open(path).read()
+
+# why 素朴な検索ではなく状態機械: 最初に現れる { はコメントや文字列の中に
+#   あることがある (テンプレートは設定例をコメントで並べる)。そこへ挿入すると
+#   ファイルを壊すので、コード部分の { だけを探す
+i, n = 0, len(raw)
+pos = None
+while i < n:
+    c = raw[i]
+    if c == "/" and i + 1 < n and raw[i + 1] == "/":
+        i = raw.find("\n", i)
+        if i == -1:
+            break
+    elif c == "/" and i + 1 < n and raw[i + 1] == "*":
+        end = raw.find("*/", i + 2)
+        i = n if end == -1 else end + 2
+    elif c == "\"":
+        i += 1
+        while i < n:
+            if raw[i] == "\\":
+                i += 2
+                continue
+            if raw[i] == "\"":
+                break
+            i += 1
+        i += 1
+    elif c == "{":
+        pos = i + 1
+        break
+    else:
+        i += 1
+if pos is None:
+    sys.exit(1)
+block = "\n  \"automation\": {\n    \"socketControlMode\": \"%s\"\n  }," % want
+open(path, "w").write(raw[:pos] + block + raw[pos:])
+' "$config" "$want"; then
+    # why 書いたら reload する: 起動中の cmux は cmux.json をメモリに持っており、
+    #   ファイルを書くだけでは socket の受け入れ判定が変わらない。この直後に
+    #   bootstrap する watcher が旧 mode (cmuxOnly) で拒否され続け、
+    #   「設定しました」と出ているのに動かない状態になる
+    # why PATH 依存にしない: target_cmux_pill の存在確認は PATH か
+    #   /Applications 実体のどちらかで通るので、裸の `cmux` が無い経路がある
+    local cmux_bin
+    cmux_bin="$(command -v cmux 2>/dev/null || echo "/Applications/cmux.app/Contents/Resources/bin/cmux")"
+    if "$cmux_bin" reload-config >/dev/null 2>&1; then
+      : # 反映済み
+    else
+      echo "注意: cmux reload-config に失敗しました。cmux を再起動すると反映されます"
+    fi
+    echo ""
+    echo "警告: cmux の automation.socketControlMode を '$want' に設定しました。"
+    echo "      これは cmux の socket 接続制限を既定 (cmuxOnly) から緩めます。同じ macOS"
+    echo "      ユーザーで動く任意のプロセスが cmux を操作できるようになります"
+    echo "      (cmux send でターミナルに文字を送れるため、実質的に任意コマンド実行の"
+    echo "      経路が開きます)。socket ファイル自体は 0600 のままで他ユーザーは触れません。"
+    echo "      戻す: $config の automation.socketControlMode を消す (または cmuxOnly に戻す)"
+    echo "      その場合 cmux-pill-watcher は動かなくなります (ログに接続エラーが出ます)"
+    echo ""
+  else
+    echo "警告: $config への socketControlMode 挿入に失敗しました (手動で設定してください)"
+  fi
+}
+
 target_cmux_pill() {
   # why ここでも本体をリンクする: plist が指す ~/.local/bin/cmux-pill-watcher は
   # target_bin が張るので、--only cmux-pill 単独だと exec できない job を
@@ -740,9 +923,19 @@ target_cmux_pill() {
   # ローテーションの無い watcher.log を延々と伸ばす
   if ! command -v cmux >/dev/null 2>&1 \
      && [ ! -x "/Applications/cmux.app/Contents/Resources/bin/cmux" ]; then
+    # why plist も外す: LaunchAgents 配下の plist はログイン時に launchd が
+    # 自動ロードするので、bootout しただけでは次のログインで復活する。
+    # cmux を消した後もこの job が残ると、上のとおり永久再起動でログが伸びる
+    if [ -L "$HOME/Library/LaunchAgents/com.crgstar.cmux-pill.plist" ]; then
+      rm -f "$HOME/Library/LaunchAgents/com.crgstar.cmux-pill.plist"
+      echo "撤去: cmux CLI が無いため com.crgstar.cmux-pill.plist を外しました"
+    fi
     echo "スキップ: cmux CLI が無いため com.crgstar.cmux-pill は登録しません"
     return
   fi
+  # why 登録の直前: cmux があると確認できてから触る。cmux 未導入のマシンで
+  # 設定だけ緩めるのは無意味に権限を開けるだけ
+  cmux_enable_automation_socket
   link_file "$DOTFILES_DIR/launchd/com.crgstar.cmux-pill.plist" \
             "$HOME/Library/LaunchAgents/com.crgstar.cmux-pill.plist"
   if launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.crgstar.cmux-pill.plist" 2>/dev/null; then

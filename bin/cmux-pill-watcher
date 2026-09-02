@@ -211,7 +211,9 @@ def stream_once(debouncer: Debouncer, seen_boot: dict[str, str]) -> None:
             # why boot_id が変わったら総なめ: cmux 再起動後 (と watcher が cmux より
             #   先に起きて起動時の sweep が空振りした場合) は、既に Needs input で
             #   止まっているワークスペースへ agent.hook.* がもう飛んでこない。
-            #   ハンドシェイク行にも boot_id が載るので、接続できた時点で揃え直す。
+            #   boot_id は購読直後に届く ack 行 (type: "ack") に載っており、
+            #   --no-heartbeat を付けても 30ms 程度で来る (実測)。イベントも
+            #   heartbeat も待たずに、接続できた時点で揃え直せる。
             #   1 boot につき 1 回だけ (失敗しても再試行しない = ログを溢れさせない)
             boot_id = ev.get("boot_id")
             if boot_id and boot_id != seen_boot.get("id"):

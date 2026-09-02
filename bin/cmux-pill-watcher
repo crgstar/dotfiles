@@ -171,7 +171,12 @@ class Debouncer:
 
 def stream_once(debouncer: Debouncer, seen_boot: dict[str, str]) -> None:
     """events を 1 接続ぶん読む。切断で戻る。"""
-    os.makedirs(os.path.dirname(CURSOR_FILE), exist_ok=True)
+    # why dirname が空なら作らない: CMUX_PILL_CURSOR にディレクトリ成分の無い相対パスを
+    #   入れられると makedirs("") が FileNotFoundError を投げ、main の総括 except が
+    #   「ストリームが落ちた」と誤って報告したままバックオフに入って永久に動かなくなる
+    cursor_dir = os.path.dirname(CURSOR_FILE)
+    if cursor_dir:
+        os.makedirs(cursor_dir, exist_ok=True)
     args = [
         CMUX,
         "events",
@@ -182,56 +187,57 @@ def stream_once(debouncer: Debouncer, seen_boot: dict[str, str]) -> None:
         CURSOR_FILE,
     ]
     env = dict(os.environ, CMUX_QUIET="1")
-    proc = subprocess.Popen(
+    # why with: 再接続のたびに新しい子を作る常駐なので、パイプの後始末を GC 任せに
+    #   しない (終了経路が例外・kill と分かれても stdout/stderr が確実に閉じる)
+    with subprocess.Popen(
         args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env
-    )
+    ) as proc:
+        # why stderr を捨てない: 捨てると「ストリームが即 EOF で戻る」ような不調の原因が
+        # 一切ログに残らない。別スレッドで読み切らないとパイプが詰まって子が止まる
+        def drain_stderr() -> None:
+            assert proc.stderr is not None
+            for err in proc.stderr:
+                err = err.strip()
+                if err:
+                    log(f"events stderr: {err[:300]}")
 
-    # why stderr を捨てない: 捨てると「ストリームが即 EOF で戻る」ような不調の原因が
-    # 一切ログに残らない。別スレッドで読み切らないとパイプが詰まって子が止まる
-    def drain_stderr() -> None:
-        assert proc.stderr is not None
-        for err in proc.stderr:
-            err = err.strip()
-            if err:
-                log(f"events stderr: {err[:300]}")
+        t = threading.Thread(target=drain_stderr, daemon=True)
+        t.start()
 
-    t = threading.Thread(target=drain_stderr, daemon=True)
-    t.start()
-
-    try:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.strip()
-            if not line.startswith("{"):
-                continue
-            try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            # why boot_id が変わったら総なめ: cmux 再起動後 (と watcher が cmux より
-            #   先に起きて起動時の sweep が空振りした場合) は、既に Needs input で
-            #   止まっているワークスペースへ agent.hook.* がもう飛んでこない。
-            #   boot_id は購読直後に届く ack 行 (type: "ack") に載っており、
-            #   --no-heartbeat を付けても 30ms 程度で来る (実測)。イベントも
-            #   heartbeat も待たずに、接続できた時点で揃え直せる。
-            #   1 boot につき 1 回だけ (失敗しても再試行しない = ログを溢れさせない)
-            boot_id = ev.get("boot_id")
-            if boot_id and boot_id != seen_boot.get("id"):
-                seen_boot["id"] = boot_id
-                sweep_all(debouncer)
-            if ev.get("type") != "event":
-                continue
-            workspace_id = ev.get("workspace_id")
-            if workspace_id:
-                debouncer.schedule(workspace_id)
-    finally:
-        proc.terminate()
         try:
-            rc = proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            rc = None
-        log(f"events が終了 (exit={rc})")
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                # why boot_id が変わったら総なめ: cmux 再起動後 (と watcher が cmux より
+                #   先に起きて起動時の sweep が空振りした場合) は、既に Needs input で
+                #   止まっているワークスペースへ agent.hook.* がもう飛んでこない。
+                #   boot_id は購読直後に届く ack 行 (type: "ack") に載っており、
+                #   --no-heartbeat を付けても 30ms 程度で来る (実測)。イベントも
+                #   heartbeat も待たずに、接続できた時点で揃え直せる。
+                #   1 boot につき 1 回だけ (失敗しても再試行しない = ログを溢れさせない)
+                boot_id = ev.get("boot_id")
+                if boot_id and boot_id != seen_boot.get("id"):
+                    seen_boot["id"] = boot_id
+                    sweep_all(debouncer)
+                if ev.get("type") != "event":
+                    continue
+                workspace_id = ev.get("workspace_id")
+                if workspace_id:
+                    debouncer.schedule(workspace_id)
+        finally:
+            proc.terminate()
+            try:
+                rc = proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                rc = None
+            log(f"events が終了 (exit={rc})")
 
 
 def sweep_all(debouncer: Debouncer) -> None:

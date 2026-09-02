@@ -725,6 +725,47 @@ target_reflect() {
   fi
 }
 
+# cmux.json (JSONC) の automation.socketControlMode を読む。ファイルは書き換えない。
+# 出力: 値 / "" (セクションはあるがキーが無い) / __missing_section__ / __unreadable__
+#
+# why 末尾カンマも落とす: cmux が生成するテンプレートは `"schemaVersion": 1,` の
+#   直後に `}` が来る形で、JSONC では合法だが json.loads は拒否する。落とさないと
+#   parse 失敗 → 現在値が読めない → 「キー無し」と誤判定して二重挿入しうる
+#
+# why セクション有無と値の有無を別の答えで返す: automation には socketPassword /
+#   portBase 等の兄弟キーがあり、「セクションはあるが socketControlMode だけ無い」
+#   が普通に起こる。これを「キー無し」と一括すると開き波括弧の直後に 2 つ目の
+#   "automation" を挿入してしまい、JSON の後勝ちで挿入側が丸ごと無効化される
+#   (= 何も効いていないのに「設定しました」と出る)
+cmux_read_socket_mode() {
+  python3 -c '
+import json, re, sys
+raw = open(sys.argv[1]).read()
+raw = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
+raw = re.sub(r"^\s*//.*$", "", raw, flags=re.M)
+raw = re.sub(r",(\s*[}\]])", r"\1", raw)
+try:
+    data = json.loads(raw)
+except Exception:
+    print("__unreadable__")
+    sys.exit(0)
+# 挿入して安全なのは「トップレベルが object で automation キー自体が無い」ときだけ。
+# それ以外の想定外の形 (トップレベルが object でない / automation が object でない) は
+# 挿入位置を保証できないので触らせない
+if not isinstance(data, dict):
+    print("__unreadable__")
+    sys.exit(0)
+if "automation" not in data:
+    print("__missing_section__")
+    sys.exit(0)
+section = data["automation"]
+if not isinstance(section, dict):
+    print("__unreadable__")
+    sys.exit(0)
+print(section.get("socketControlMode") or "")
+' "$1" 2>/dev/null || echo "__unreadable__"
+}
+
 # cmux の automation socket を launchd 常駐から使える状態にする。
 #
 # why setup.sh が触る: 既定の cmuxOnly は「cmux ターミナル内で起動したプロセス」
@@ -754,44 +795,8 @@ cmux_enable_automation_socket() {
     return
   fi
 
-  # JSONC のコメントと末尾カンマを落として現在値だけを読む (ファイルは書き換えない)
-  #
-  # why 末尾カンマも落とす: cmux が生成するテンプレートは `"schemaVersion": 1,` の
-  #   直後に `}` が来る形で、JSONC では合法だが json.loads は拒否する。落とさないと
-  #   parse 失敗 → 現在値が読めない → 「キー無し」と誤判定して二重挿入しうる
-  #
-  # why セクション有無と値の有無を別の答えで返す: automation には socketPassword /
-  #   portBase 等の兄弟キーがあり、「セクションはあるが socketControlMode だけ無い」
-  #   が普通に起こる。これを「キー無し」と一括すると開き波括弧の直後に 2 つ目の
-  #   "automation" を挿入してしまい、JSON の後勝ちで挿入側が丸ごと無効化される
-  #   (= 何も効いていないのに「設定しました」と出る)
   local current
-  current="$(python3 -c '
-import json, re, sys
-raw = open(sys.argv[1]).read()
-raw = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
-raw = re.sub(r"^\s*//.*$", "", raw, flags=re.M)
-raw = re.sub(r",(\s*[}\]])", r"\1", raw)
-try:
-    data = json.loads(raw)
-except Exception:
-    print("__unreadable__")
-    sys.exit(0)
-# 挿入して安全なのは「トップレベルが object で automation キー自体が無い」ときだけ。
-# それ以外の想定外の形 (トップレベルが object でない / automation が object でない) は
-# 挿入位置を保証できないので触らせない
-if not isinstance(data, dict):
-    print("__unreadable__")
-    sys.exit(0)
-if "automation" not in data:
-    print("__missing_section__")
-    sys.exit(0)
-section = data["automation"]
-if not isinstance(section, dict):
-    print("__unreadable__")
-    sys.exit(0)
-print(section.get("socketControlMode") or "")
-' "$config" 2>/dev/null)" || current="__unreadable__"
+  current="$(cmux_read_socket_mode "$config")"
 
   if [ "$current" = "$want" ]; then
     return
@@ -838,7 +843,8 @@ print(section.get("socketControlMode") or "")
   # why 書き換え前に .bak: 全文書き戻し (open(path,"w")) なので途中で失敗すると
   # 6KB のテンプレートごと失う。cmux 自身のエージェント向け手順も
   # 「編集前にタイムスタンプ付き .bak を取れ」と明示している (cmux docs settings)
-  cp "$config" "$config.$(date +%Y%m%d%H%M%S).bak"
+  local backup="$config.$(date +%Y%m%d%H%M%S).bak"
+  cp "$config" "$backup"
 
   # automation セクションごと無い: 開き波括弧の直後に挿入する。sed ではなく python なのは、
   # 「最初の { の直後だけ」を 1 回で当てるため
@@ -881,6 +887,17 @@ if pos is None:
 block = "\n  \"automation\": {\n    \"socketControlMode\": \"%s\"\n  }," % want
 open(path, "w").write(raw[:pos] + block + raw[pos:])
 ' "$config" "$want"; then
+    # why 書いた結果をもう一度読む: 全文書き戻しなので、挿入位置の判定を誤ると
+    #   cmux が読めない JSON を置いたまま「設定しました」と出てしまい、
+    #   動かない原因が設定ファイル側にあることに気づけない
+    if [ "$(cmux_read_socket_mode "$config")" != "$want" ]; then
+      cp "$backup" "$config"
+      echo "警告: $config への socketControlMode 挿入が壊れた結果になったため元に戻しました"
+      echo "      手動で設定してください:"
+      echo "$how_to"
+      echo "$how_to2"
+      return
+    fi
     # why 書いたら reload する: 起動中の cmux は cmux.json をメモリに持っており、
     #   ファイルを書くだけでは socket の受け入れ判定が変わらない。この直後に
     #   bootstrap する watcher が旧 mode (cmuxOnly) で拒否され続け、
@@ -904,7 +921,12 @@ open(path, "w").write(raw[:pos] + block + raw[pos:])
     echo "      その場合 cmux-pill-watcher は動かなくなります (ログに接続エラーが出ます)"
     echo ""
   else
+    # why 戻す: python が途中で落ちると書きかけの全文が残りうる。.bak を残すだけでは
+    #   cmux が壊れた設定を読み続ける
+    cp "$backup" "$config"
     echo "警告: $config への socketControlMode 挿入に失敗しました (手動で設定してください)"
+    echo "$how_to"
+    echo "$how_to2"
   fi
 }
 

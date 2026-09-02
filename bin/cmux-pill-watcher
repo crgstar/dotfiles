@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""cmux のサイドバーステータスピルを、状態ごとに見分けやすい色へ塗り替える常駐プロセス。
+
+cmux は Running と Needs input を同じ青 (#4C8DFF) で描き、アイコンだけを
+bolt.fill / bell.fill で変えている (Sources/Feed/FeedCoordinator.swift に hex が
+ハードコードされており設定キーは無い。upstream issue #2616)。色は実行時に
+`cmux set-status` で上書きできるので、cmux が状態を書いた直後に塗り直す。
+
+why イベント購読で agent カテゴリだけを見る:
+  - cmux 内部のピル書き込み (FeedCoordinator) は in-process なので
+    sidebar.metadata.* イベントを発火しない。トリガに使えるのは agent.hook.* だけ
+  - 逆に自分の set-status は sidebar カテゴリのイベントを発火する。agent だけを
+    購読すればそれがストリームに入ってこないので、フィードバックループが構造的に
+    起きない (自己判別のマーカーが不要)
+
+why 状態を自分で推論しない:
+  イベント名から「今は needs input のはず」と組み立てると cmux の状態機械を
+  二重実装することになり、upstream の誤判定 (#1027 / #8628) をこちらでも再現する。
+  cmux が書いたピルの値を読んで色だけ差し替える。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+CMUX = os.environ.get("CMUX_BIN") or shutil.which("cmux") or (
+    "/Applications/cmux.app/Contents/Resources/bin/cmux"
+)
+
+# 塗り替え対象。キーはピルの value (cmux が書く表示文字列) と完全一致で照合する。
+# Running は既定の青のままにするので載せない。
+RECOLOR = {
+    "Needs input": os.environ.get("CMUX_PILL_NEEDS_INPUT_COLOR", "#FFD60A"),
+}
+
+# ピルのキー。cmux の Claude Code 連携が使うものと同じキーを上書きする。
+PILL_KEY = "claude_code"
+
+# sidebar-state が value の後ろに並べるピル属性 (= set-status のオプション名)。
+PILL_ATTRS = ("icon", "color", "priority")
+
+# why 遅延: agent.hook.* を受けた時点では cmux がまだピルを書いていないことがある。
+#           読む前に少し待つ。
+READ_DELAY_SEC = float(os.environ.get("CMUX_PILL_READ_DELAY", "0.3"))
+
+# why デバウンス: PreToolUse / PostToolUse はツール呼び出しごとに飛ぶので、
+#                 同一ワークスペースの連続イベントは 1 回に畳む。
+DEBOUNCE_SEC = float(os.environ.get("CMUX_PILL_DEBOUNCE", "0.4"))
+
+# why 指数バックオフ: events が即座に失敗して戻る状況 (CLI 側のエラー等) を固定 5 秒で
+#   回すと 1 時間で 700 行超のログを吐く (実際に 6,898 行まで膨らませた)。
+#   失敗が続くほど間隔を空け、ログも「間隔が変わった時」だけ出す。
+#   なお socket 不通は --reconnect が子プロセス内で無言リトライするので (実測)
+#   ここには落ちてこない。バックオフは子が本当に終了したときの保険。
+RECONNECT_MIN_SEC = 5.0
+RECONNECT_MAX_SEC = 300.0
+
+CURSOR_FILE = os.path.expanduser(
+    os.environ.get("CMUX_PILL_CURSOR", "~/.local/state/cmux-pill/cursor")
+)
+
+
+def log(msg: str) -> None:
+    print(f"[cmux-pill] {msg}", flush=True)
+
+
+def run_cmux(args: list[str], timeout: float = 5.0) -> str | None:
+    """cmux CLI を叩いて stdout を返す。失敗は None (呼び出し側で黙って諦める)。"""
+    env = dict(os.environ, CMUX_QUIET="1")
+    try:
+        r = subprocess.run(
+            [CMUX, *args], capture_output=True, text=True, timeout=timeout, env=env
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log(f"warn: cmux {' '.join(args)} が失敗: {exc}")
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout
+
+
+def read_pill(workspace_id: str) -> dict[str, str] | None:
+    """ピルを {"value": ..., "icon": ..., "color": ..., "priority": ...} で返す。
+
+    why 色以外も持ち帰る: 塗り替えは set-status の再発行なので、指定しなかった属性は
+    cmux 側の既定値に戻る。cmux が書いた icon / priority をそのまま渡し直せるよう、
+    読める属性は全部拾う (出現しなかったキーは dict に入れない)。
+    """
+    out = run_cmux(["sidebar-state", "--workspace", workspace_id])
+    if out is None:
+        return None
+    for raw in out.splitlines():
+        line = raw.strip()
+        if not line.startswith(f"{PILL_KEY}="):
+            continue
+        # 形式: claude_code=Needs input icon=bell.fill color=#4C8DFF priority=100
+        # (cmux 自身が書いた直後は priority が付かないこともある)
+        body = line[len(PILL_KEY) + 1 :]
+        pill: dict[str, str] = {}
+        cuts = []
+        for field in PILL_ATTRS:
+            marker = f" {field}="
+            idx = body.find(marker)
+            if idx == -1:
+                continue
+            cuts.append(idx)
+            pill[field] = body[idx + len(marker) :].split(" ", 1)[0]
+        # value は最初に現れた属性の手前まで (属性の並び順に依存させない)
+        pill["value"] = (body[: min(cuts)] if cuts else body).strip()
+        return pill
+    return None
+
+
+def reconcile(workspace_id: str) -> None:
+    """ワークスペース 1 件のピル色を望みの色へ揃える。"""
+    pill = read_pill(workspace_id)
+    if pill is None:
+        return
+    value = pill["value"]
+    color = pill.get("color", "")
+    want = RECOLOR.get(value)
+    if want is None or color.upper() == want.upper():
+        return
+    # why 読んだ属性を渡し直す: 決め打ちにすると色以外まで書き換えてしまう
+    #   (icon を value から推測すると RECOLOR に別状態を足した途端に別アイコンで
+    #    塗り潰し、priority を固定すると他のピルとの並び順が変わる)
+    args = ["set-status", PILL_KEY, value, "--color", want]
+    if "icon" in pill:
+        args += ["--icon", pill["icon"]]
+    if "priority" in pill:
+        args += ["--priority", pill["priority"]]
+    args += ["--workspace", workspace_id]
+    ok = run_cmux(args)
+    if ok is not None:
+        log(f"{workspace_id[:8]} {value}: {color or 'なし'} -> {want}")
+
+
+class Debouncer:
+    """ワークスペース単位で reconcile を間引く。"""
+
+    def __init__(self) -> None:
+        self._timers: dict[str, threading.Timer] = {}
+        self._lock = threading.Lock()
+
+    def schedule(self, workspace_id: str) -> None:
+        with self._lock:
+            old = self._timers.pop(workspace_id, None)
+            if old is not None:
+                old.cancel()
+            t = threading.Timer(
+                DEBOUNCE_SEC + READ_DELAY_SEC, self._fire, args=(workspace_id,)
+            )
+            t.daemon = True
+            self._timers[workspace_id] = t
+            t.start()
+
+    def _fire(self, workspace_id: str) -> None:
+        with self._lock:
+            self._timers.pop(workspace_id, None)
+        try:
+            reconcile(workspace_id)
+        except Exception as exc:  # 常駐を落とさない
+            log(f"warn: reconcile 失敗 {workspace_id[:8]}: {exc}")
+
+
+def stream_once(debouncer: Debouncer, seen_boot: dict[str, str]) -> None:
+    """events を 1 接続ぶん読む。切断で戻る。"""
+    os.makedirs(os.path.dirname(CURSOR_FILE), exist_ok=True)
+    args = [
+        CMUX,
+        "events",
+        "--category",
+        "agent",
+        "--reconnect",
+        "--cursor-file",
+        CURSOR_FILE,
+    ]
+    env = dict(os.environ, CMUX_QUIET="1")
+    proc = subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env
+    )
+
+    # why stderr を捨てない: 捨てると「ストリームが即 EOF で戻る」ような不調の原因が
+    # 一切ログに残らない。別スレッドで読み切らないとパイプが詰まって子が止まる
+    def drain_stderr() -> None:
+        assert proc.stderr is not None
+        for err in proc.stderr:
+            err = err.strip()
+            if err:
+                log(f"events stderr: {err[:300]}")
+
+    t = threading.Thread(target=drain_stderr, daemon=True)
+    t.start()
+
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            # why boot_id が変わったら総なめ: cmux 再起動後 (と watcher が cmux より
+            #   先に起きて起動時の sweep が空振りした場合) は、既に Needs input で
+            #   止まっているワークスペースへ agent.hook.* がもう飛んでこない。
+            #   ハンドシェイク行にも boot_id が載るので、接続できた時点で揃え直す。
+            #   1 boot につき 1 回だけ (失敗しても再試行しない = ログを溢れさせない)
+            boot_id = ev.get("boot_id")
+            if boot_id and boot_id != seen_boot.get("id"):
+                seen_boot["id"] = boot_id
+                sweep_all(debouncer)
+            if ev.get("type") != "event":
+                continue
+            workspace_id = ev.get("workspace_id")
+            if workspace_id:
+                debouncer.schedule(workspace_id)
+    finally:
+        proc.terminate()
+        try:
+            rc = proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            rc = None
+        log(f"events が終了 (exit={rc})")
+
+
+def sweep_all(debouncer: Debouncer) -> None:
+    """全ワークスペースを一巡し、既に Needs input のものを揃える。"""
+    out = run_cmux(["workspace", "list", "--id-format", "uuids"], timeout=10.0)
+    if out is None:
+        # why 黙って諦めない: ここが空振りすると「イベントが来ないワークスペースは
+        #   一生塗り替わらない」状態になり、ログに手掛かりが無いと切り分けできない
+        log("warn: workspace list が取れず sweep を見送りました")
+        return
+    for raw in out.splitlines():
+        for token in raw.replace("*", " ").split():
+            # UUID らしいトークンだけ拾う
+            if len(token) == 36 and token.count("-") == 4:
+                debouncer.schedule(token)
+
+
+def main() -> int:
+    # why which も見る: CMUX_BIN に PATH 前提の裸のコマンド名を入れられると
+    #   exists() だけでは「無い」と誤判定して即 exit する
+    if not (os.path.exists(CMUX) or shutil.which(CMUX)):
+        log(f"error: cmux CLI が見つかりません: {CMUX}")
+        return 1
+    log(f"起動 (cmux={CMUX}, needs-input={RECOLOR['Needs input']})")
+    debouncer = Debouncer()
+    # 初回 sweep はストリーム接続時 (boot_id 検出) に回す。RunAtLoad では cmux より
+    # 先に起きうるので、ここで叩いても空振りするだけ
+    seen_boot: dict[str, str] = {}
+    wait = RECONNECT_MIN_SEC
+    failures = 0
+    try:
+        while True:
+            connected_at = time.time()
+            try:
+                stream_once(debouncer, seen_boot)
+            except Exception as exc:
+                log(f"warn: ストリームが落ちた: {exc}")
+
+            # why 30 秒を境に判定: 接続が短命なら「そもそも繋がっていない」(cmux 未起動・
+            #   socket 拒否) とみなしてバックオフを伸ばす。長く続いた後の切断は正常な
+            #   再接続なので待ち時間をリセットする
+            if time.time() - connected_at >= 30.0:
+                if failures:
+                    log("ストリームが回復しました")
+                failures = 0
+                wait = RECONNECT_MIN_SEC
+            else:
+                failures += 1
+                prev = wait
+                wait = (
+                    min(wait * 2, RECONNECT_MAX_SEC)
+                    if failures > 1
+                    else RECONNECT_MIN_SEC
+                )
+                if failures == 1 or wait != prev:
+                    log(f"接続できません (連続 {failures} 回)。次は {wait:.0f} 秒後")
+            time.sleep(wait)
+    except KeyboardInterrupt:
+        # why ループ全体を囲む: バックオフ中の sleep で Ctrl-C を受けても
+        #   traceback ではなく停止ログで終える
+        log("停止")
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

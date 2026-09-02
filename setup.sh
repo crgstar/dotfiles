@@ -18,6 +18,7 @@ TARGETS=(
   "hooks:permission 系 hook スクリプトのリンク"
   "statusline:statusLine ラッパと RunCat Neo 用スナップショット生成のリンク"
   "reflect:reflect 無人実行 (SessionEnd hook + launchd 夜間ドライバ)"
+  "cmux-pill:cmux のサイドバーピル塗り替え常駐 (launchd)"
   "prefixes:segment-allow.prefixes を permissions.allow から再生成 (claude-settings の後)"
   "mcp:mcp/ 配下のヘルパーをリンクし、settings.local/<env>.json の mcpServers を ~/.claude.json へマージ"
 )
@@ -721,6 +722,33 @@ target_reflect() {
     echo "launchd: com.crgstar.reflect を登録しました (毎日 3:00)"
   else
     echo "警告: com.crgstar.reflect の launchctl bootstrap に失敗しました"
+  fi
+}
+
+target_cmux_pill() {
+  # why ここでも本体をリンクする: plist が指す ~/.local/bin/cmux-pill-watcher は
+  # target_bin が張るので、--only cmux-pill 単独だと exec できない job を
+  # 登録してしまう。link_file は冪等なので通常実行では skip が 1 行増えるだけ
+  link_file "$DOTFILES_DIR/bin/cmux-pill-watcher" \
+            "$HOME/.local/bin/cmux-pill-watcher"
+  mkdir -p "$HOME/.local/state/cmux-pill"
+  # why 毎回 bootout→bootstrap: plist 変更を launchd に反映させる最短手順。
+  # 未ロード時の bootout 失敗は無視してよい
+  launchctl bootout "gui/$(id -u)/com.crgstar.cmux-pill" 2>/dev/null || true
+  # why cmux 未導入なら登録しない: watcher は cmux CLI が無いと即 exit するので、
+  # KeepAlive=true の常駐 job だと ThrottleInterval ごとに永久に再起動し、
+  # ローテーションの無い watcher.log を延々と伸ばす
+  if ! command -v cmux >/dev/null 2>&1 \
+     && [ ! -x "/Applications/cmux.app/Contents/Resources/bin/cmux" ]; then
+    echo "スキップ: cmux CLI が無いため com.crgstar.cmux-pill は登録しません"
+    return
+  fi
+  link_file "$DOTFILES_DIR/launchd/com.crgstar.cmux-pill.plist" \
+            "$HOME/Library/LaunchAgents/com.crgstar.cmux-pill.plist"
+  if launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.crgstar.cmux-pill.plist" 2>/dev/null; then
+    echo "launchd: com.crgstar.cmux-pill を登録しました (常駐)"
+  else
+    echo "警告: com.crgstar.cmux-pill の launchctl bootstrap に失敗しました"
   fi
 }
 

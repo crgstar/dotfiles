@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.crgstar.cmux-pill</string>
+    <!-- why zsh -c 経由: launchd は ProgramArguments 内の $HOME や ~ を展開しない。
+         ログ出力先も同じ理由で StandardOutPath ではなくシェル側のリダイレクトに置く
+         (StandardOutPath には絶対パスしか書けず、公開リポの plist に
+         ユーザ名を含むパスを直書きすることになるため) -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-c</string>
+        <string>mkdir -p "$HOME/.local/state/cmux-pill"; exec "$HOME/.local/bin/cmux-pill-watcher" &gt;&gt; "$HOME/.local/state/cmux-pill/watcher.log" 2&gt;&amp;1</string>
+    </array>
+    <!-- 常駐型。cmux 未起動・再起動でストリームが切れても watcher 自身が
+         再接続を試み、プロセスごと落ちた場合は launchd が上げ直す -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <!-- why ThrottleInterval: cmux がインストールされていない等の即死ケースで
+         KeepAlive が秒間再起動を繰り返してログを溢れさせるのを防ぐ -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+</dict>
+</plist>

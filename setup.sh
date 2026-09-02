@@ -565,6 +565,12 @@ target_skills() {
             "$HOME/.claude/skills/explain/assets/template.html"
   link_file "$DOTFILES_DIR/.claude/skills-global/write-shared-docs/SKILL.md" \
             "$HOME/.claude/skills/write-shared-docs/SKILL.md"
+  # why: unslop は日本語向けの翻案で、英語の文章は原典 reference-en.md に送り返す。
+  #      SKILL.md 単体を配ると英語側の行き先が解決できず、判定が宙に浮く。
+  link_file "$DOTFILES_DIR/.claude/skills-global/unslop/SKILL.md" \
+            "$HOME/.claude/skills/unslop/SKILL.md"
+  link_file "$DOTFILES_DIR/.claude/skills-global/unslop/reference-en.md" \
+            "$HOME/.claude/skills/unslop/reference-en.md"
   # why: memory-guide は memory-guide-gate.sh (PreToolUse) の deny 理由文が
   #      名指しで起動を促す先。リンクが無いとモデルは案内どおり呼べず、
   #      差し戻しに応じる手段が無くなる。tidy-memory は判定・書式の正本として

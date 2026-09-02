@@ -67,6 +67,7 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
   - IMPORTANT: `.claude/skills/` にあるものを「`link_file` の書き忘れ」と判断しないこと。そこにあること自体が project 限定の意思表示
 - カスタムサブエージェントは `.claude/agents/<name>.md` に配置し、`~/.claude/agents/` へリンクする（user スコープ）。スキルが委譲する隔離処理 (生ログ・秘密の検査) や別コンテキストでのレビューを tools 制限付きで担わせる用途。判定基準は写経せず、呼び出し元 SKILL.md の該当節を Read させる (例: `retro-extractor` / `sanitize-auditor` / `doc-reviewer` / `skill-md-reviewer`)
 - 第三者リポのスキルは dotfiles に取り込まず、`~/.local/share/<name>/` に shallow clone してから `link_file` で配る (例: `mattpocock-skills` / `grill-me` / `grill-with-docs`)
+  - 例外は「翻案元として逐語で置くファイル」だけ (例: `unslop/reference-en.md`)。1 ファイルのために丸ごと clone すると翻案物と原典が別管理になり、対訳としてずれる。取り込む場合は原典のライセンス表記 (著作権表示 + 許諾文) をファイル冒頭のコメントに丸ごと入れる — 公開リポなので再配布に当たる
 
 ## コミット前のサニタイズ
 

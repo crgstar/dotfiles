@@ -25,7 +25,7 @@ why 既に色が付いていたら何もしない:
 使い方:
   cmux-workspace-color            # cmux 内なら着色、外なら何もしない
   cmux-workspace-color --print    # 着色せず、決まる色と内訳を出す (確認用)
-  cmux-workspace-color --force    # 既に色が付いていても上書きする
+  cmux-workspace-color --force    # git 管理下でのみ、手で付けた色も上書きする
   cmux-workspace-color --sync     # 手元のリポジトリを列挙して未割り当てに色を配る
 
 割り当ての記録を手で編集すれば、特定のリポジトリを好きな色に固定できる。
@@ -301,8 +301,14 @@ def current_color(workspace_id: str) -> str | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(add_help=True)
-    ap.add_argument("--print", dest="print_only", action="store_true")
-    ap.add_argument("--force", action="store_true")
+    ap.add_argument(
+        "--print", dest="print_only", action="store_true",
+        help="着色せず、決まる色と内訳を出す",
+    )
+    ap.add_argument(
+        "--force", action="store_true",
+        help="git 管理下でのみ、手で付けた色も上書きする",
+    )
     ap.add_argument("--sync", action="store_true", help="手元のリポジトリを列挙して未割り当てに色を配る")
     ap.add_argument("--cwd", default=os.getcwd())
     args = ap.parse_args()
@@ -334,6 +340,9 @@ def main() -> int:
             return 0
         # git 管理外へ移動した: 自分が付けた色なら外す。
         # why 消す: 色が付いているならプロジェクトにいる、という意味を保つため
+        # why --force を見ない: ここで force を効かせると手で付けた色を消す方向に
+        #   働く。--force は「この色に塗り替える」ための指定で、色を捨てる許可では
+        #   ないので、git 管理外では常に is_ours の判定だけで決める
         if workspace_id:
             now = current_color(workspace_id)
             if now is not None and now != UNREADABLE and is_ours(now):

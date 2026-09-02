@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+"""cwd の git リポジトリ名から決定的に色を選び、cmux のワークスペースへ着ける。
+
+同じリポジトリなら常に同じ色になり、別のリポジトリと色が重複しない。
+worktree は親リポと同じ色。
+
+why 割り当てを記録する: 名前から色への関数は、名前空間がパレットより大きい限り
+  必ず衝突する (鳩の巣原理)。実際に色相と明度をハッシュで振る方式では、よく使う
+  リポジトリ同士が ΔE 9 程度のニアミスになり 4px のバーで判別できなかった。
+  第一希望はハッシュで決めるが、既に他が使っている色なら次の候補へ回し、結果を
+  ~/.config/cmux/workspace-colors.json に残す。一度決まった色は変わらない。
+  代償として、マシンをまたぐと色が変わる (このファイルをコピーすれば揃う)。
+
+why 色はリポジトリ単位:
+  ディレクトリ名で決めると、同一プロジェクトの worktree がバラバラの色になり
+  「どのプロジェクトを触っているか」が読めない。かといって worktree ごとに
+  濃淡を振ろうにも、worktree は 20 件を超えることがあり、細い左バーで判別できる
+  段数 (せいぜい 3〜4) では足りない。色は「どのプロジェクトか」だけを表し、
+  worktree 同士はワークスペース名で見分ける。
+
+why 既に色が付いていたら何もしない:
+  手で付けた色 (cmux workspace-action --action set-color) を毎回のシェル起動で
+  上書きしないため。付け直したいときは clear-color してから新しいシェルを開く。
+
+使い方:
+  cmux-workspace-color            # cmux 内なら着色、外なら何もしない
+  cmux-workspace-color --print    # 着色せず、決まる色と内訳を出す (確認用)
+  cmux-workspace-color --force    # 既に色が付いていても上書きする
+  cmux-workspace-color --sync     # 手元のリポジトリを列挙して未割り当てに色を配る
+
+割り当ての記録を手で編集すれば、特定のリポジトリを好きな色に固定できる。
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+CMUX = os.environ.get("CMUX_BIN") or shutil.which("cmux") or (
+    "/Applications/cmux.app/Contents/Resources/bin/cmux"
+)
+
+# 知覚距離 (CIE Lab の ΔE) を最大化するよう選んだ 64 色。
+#
+# why 計算式ではなく固定リスト: 色相と明度をハッシュで独立に振る方式だと、
+#   別リポジトリが「隣接色相 かつ 近い明度」に落ちて ΔE 9 程度のニアミスになり、
+#   4px のバーでは同じ色に見えた (実測して判別不能を確認済み)。候補を広く生成し
+#   min ΔE を最大化する貪欲選択で選んだ 64 色を固定する。この 64 色の中で
+#   最も近い 2 色でも ΔE 18.9 あり、判別できなかった組の 2 倍以上離れている。
+# why 64 色: 手元のリポジトリ数 (数十) に対する余裕。増やすほど ΔE は下がる
+#   (48 色で 21.5 / 64 色で 18.9 / 72 色で 17.9)。
+PALETTE = (
+    "#F20D0D", "#B62020", "#EA9686", "#A15036",
+    "#F6815A", "#CB4B0B", "#F8AD77", "#B65F20",
+    "#DBB294", "#F27F0D", "#B68420", "#F2A60D",
+    "#F8D877", "#DBCF94", "#F2CC0D", "#A19836",
+    "#F6E95A", "#AAB620", "#CCF20D", "#D8F877",
+    "#94F434", "#B2DB94", "#62A136", "#82F877",
+    "#0DF20D", "#20B620", "#0DF259", "#20B66B",
+    "#86EAB8", "#34F4B4", "#94DBC9", "#36A186",
+    "#0DF2F2", "#3698A1", "#49B9DF", "#0D93F2",
+    "#3674A1", "#94B2DB", "#0B5BCB", "#3659A1",
+    "#0D46F2", "#5A67F6", "#0D0DF2", "#9494DB",
+    "#3B0BCB", "#5936A1", "#A786EA", "#9B5AF6",
+    "#6B20B6", "#9434F4", "#C277F8", "#DC5AF6",
+    "#DF0DF2", "#A136A1", "#CB0BBB", "#D47DCC",
+    "#F65AC2", "#CB0B7B", "#E56CA8", "#A1366B",
+    "#DB94B2", "#F43464", "#E56C80", "#A13647",
+)
+
+# 割り当ての記録。リポジトリ名 -> 色。
+#
+# why 公開リポジトリに置かない: 中身はリポジトリ名の一覧なので、dotfiles (public) に
+#   入れると作業リポジトリ名が漏れる。dotfiles は仕組みだけを配り、データはここに置く。
+ASSIGN_FILE = Path(
+    os.environ.get("CMUX_WORKSPACE_COLOR_FILE", "")
+    or Path.home() / ".config" / "cmux" / "workspace-colors.json"
+)
+
+
+def stable_index(text: str, modulo: int) -> int:
+    """名前から決定的なインデックスを引く。
+
+    why hash() を使わない: Python の文字列 hash はプロセスごとに
+    ソルトされる (PYTHONHASHSEED)。シェルを開き直すと色が変わってしまう。
+    """
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % modulo
+
+
+def git(args: list[str], cwd: str) -> str | None:
+    try:
+        r = subprocess.run(
+            ["git", *args], capture_output=True, text=True, timeout=5, cwd=cwd
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if r.returncode != 0:
+        return None
+    out = r.stdout.strip()
+    return out or None
+
+
+def identify(cwd: str) -> tuple[str, str] | None:
+    """(リポジトリ名, worktree 名) を返す。git 管理外なら None。"""
+    toplevel = git(["rev-parse", "--show-toplevel"], cwd)
+    if toplevel is None:
+        return None
+    # why --git-common-dir: worktree では親リポの .git を指すので、そこから
+    #   リポジトリ名を得られる。--show-toplevel は worktree 自身の名前
+    common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd)
+    if common is None:
+        return None
+    # why 末尾が .git とは限らない: submodule の common dir は
+    #   <親リポ>/.git/modules/<名前> なので親を取ると全 submodule が "modules" に
+    #   潰れて同じ色相になる。--separate-git-dir では <どこか>/<名前>.git になる
+    gitdir = Path(common)
+    repo = gitdir.parent.name if gitdir.name == ".git" else gitdir.name
+    if repo.endswith(".git"):
+        repo = repo[: -len(".git")]
+    worktree = Path(toplevel).name
+    return repo, worktree
+
+
+# 初期生成でリポジトリを探すルート。直下の子ディレクトリだけを見る。
+#
+# why 深く潜らない: node_modules や vendor 配下の git リポジトリまで拾うと、
+#   一度も開かないものにパレットを食われる。
+DEFAULT_ROOTS = ("~/projects", "~")
+
+
+def enumerate_repos(roots: tuple[str, ...] = DEFAULT_ROOTS) -> list[str]:
+    """ルート直下の git リポジトリ名を、名前順で返す。
+
+    why .git がディレクトリのものだけ: ファイルなら linked worktree で、
+    色は親リポと共有する。親リポは別途列挙されるので、ここで拾うと
+    worktree のディレクトリ名まで別リポジトリとして色を食ってしまう。
+    """
+    found: set[str] = set()
+    for root in roots:
+        base = Path(os.path.expanduser(root))
+        try:
+            children = list(base.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            try:
+                if (child / ".git").is_dir():
+                    found.add(child.name)
+            except OSError:
+                continue
+    return sorted(found)
+
+
+def assign_missing(assign: dict[str, str], repos: list[str]) -> list[tuple[str, str]]:
+    """まだ色が無いリポジトリへ順に割り当てる。追加された分を返す。
+
+    why 名前順で回す: 割り当て結果を「どのリポジトリを最初に開いたか」に
+    依存させないため。記録を消して作り直しても同じ結果になる。
+    """
+    added = []
+    for repo in repos:
+        color, is_new = pick_color(repo, assign)
+        if is_new:
+            assign[repo] = color
+            added.append((repo, color))
+    return added
+
+
+def load_assignments() -> dict[str, str]:
+    try:
+        with ASSIGN_FILE.open() as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def save_assignments(assign: dict[str, str]) -> bool:
+    """atomic に書く。書けなくても致命ではないので bool を返すだけ。
+
+    why 書く直前にディスクを読み直す: シェル起動ごとに走るので、cmux が複数の
+    ワークスペースを一斉に復元すると同時実行になる。各プロセスが「読んだ時点の記録 +
+    自分の 1 件」を書き戻すと、最後の 1 つ以外の割り当てが消える。消えた色は次回
+    「未使用」に見えるので別のリポジトリへ配られ、色が重複する。既にディスクにある
+    割り当てを先着として優先し、こちらの新規分だけを足す (assign も同じ内容に揃える)。
+
+    why tmp 名にプロセス ID を入れる: 固定名だと同時実行が同じ一時ファイルを書き合い、
+    書きかけの中身を os.replace で本番へ持っていく。
+    """
+    for repo, existing in load_assignments().items():
+        assign[repo] = existing
+    tmp = ASSIGN_FILE.with_name(f"{ASSIGN_FILE.name}.{os.getpid()}.tmp")
+    try:
+        ASSIGN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with tmp.open("w") as f:
+            json.dump(assign, f, indent=2, ensure_ascii=False, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp, ASSIGN_FILE)
+        return True
+    except OSError:
+        # why 消す: replace 前に落ちると pid 付きの tmp が残り続ける
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
+
+
+def pick_color(repo: str, assign: dict[str, str]) -> tuple[str, bool]:
+    """(色, 新規に割り当てたか) を返す。
+
+    why ハッシュだけで決めないで衝突回避を入れる: 名前から色への関数は、名前空間が
+    パレットより大きい限り必ず衝突する (鳩の巣原理。リポジトリ 48 件を 24 色に配れば
+    24 組は必ず重複する)。第一希望をハッシュで決め、既に他のリポジトリが使っていたら
+    決定的な順序で次の候補へ回す。記録を残すので、一度決まった色は変わらない。
+    """
+    if repo in assign:
+        return assign[repo], False
+
+    used = set(assign.values())
+    first = stable_index(repo, len(PALETTE))
+    # why 名前ごとに違うステップで巡回する: 固定の +1 で探すと、先に埋まった区間に
+    #   後続が次々と流れ込んで同じ並びに固まる (linear probing の clustering)。
+    #   パレット長 64 と互いに素な奇数を名前から引くことで、巡回順を名前ごとに散らす
+    step = stable_index(f"{repo}\x00step", len(PALETTE) // 2) * 2 + 1
+    for i in range(len(PALETTE)):
+        color = PALETTE[(first + i * step) % len(PALETTE)]
+        if color not in used:
+            return color, True
+    # パレットを使い切った: 第一希望へ戻る (以降は重複を許容する)
+    return PALETTE[first], True
+
+
+def is_ours(color: str) -> bool:
+    """その色を自分が付けたと言えるか。
+
+    why パレット所属で判定する: 「自分が付けた色は付け替えてよいが、手で付けた色は
+    触らない」を区別する必要がある。記録ファイルの値と照合する方法もあるが、記録を
+    消した後も判定できるようパレットそのものと比べる。cmux の名前付き色
+    (Blue = #1565C0 等) はこのパレットに無いので、ピッカーで選んだ色は保護される。
+    パレットと同じ hex を手で入れた場合だけは自分の色と見なしてしまう。
+    """
+    return color.upper() in {c.upper() for c in PALETTE}
+
+
+def run_cmux(args: list[str]) -> str | None:
+    env = dict(os.environ, CMUX_QUIET="1")
+    try:
+        r = subprocess.run(
+            [CMUX, *args], capture_output=True, text=True, timeout=5, env=env
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+# why 「読めなかった」を「未設定」と区別する: 同一視すると cmux CLI の一時的な失敗
+#   (socket 混雑・タイムアウト・出力形式の変更) が「色は付いていない」に化け、
+#   手で付けた色を上書きしてしまう。シェル起動のたびに走るので 1 回の失敗で色が入れ替わる
+UNREADABLE = "__unreadable__"
+
+
+def current_color(workspace_id: str) -> str | None:
+    """設定済みの色を返す。未設定なら None、読み取れなければ UNREADABLE。"""
+    out = run_cmux(["sidebar-state", "--workspace", workspace_id])
+    if out is None:
+        return UNREADABLE
+    for raw in out.splitlines():
+        line = raw.strip()
+        if line.startswith("color="):
+            value = line[len("color=") :].strip()
+            return None if value in ("", "none") else value
+    # color= 行が無い = 想定した出力形式ではない。未設定と決めつけない
+    return UNREADABLE
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(add_help=True)
+    ap.add_argument("--print", dest="print_only", action="store_true")
+    ap.add_argument("--force", action="store_true")
+    ap.add_argument("--sync", action="store_true", help="手元のリポジトリを列挙して未割り当てに色を配る")
+    ap.add_argument("--cwd", default=os.getcwd())
+    args = ap.parse_args()
+
+    if args.sync:
+        assign = load_assignments()
+        repos = enumerate_repos()
+        added = assign_missing(assign, repos)
+        if added and not save_assignments(assign):
+            print(f"error: {ASSIGN_FILE} に書けませんでした", file=sys.stderr)
+            return 1
+        print(f"リポジトリ {len(repos)} 件を確認。{len(added)} 件に新しく色を割り当てました")
+        for repo, color in added:
+            print(f"  {color}  {repo}")
+        used = len(set(assign.values()))
+        print(f"記録: {len(assign)} 件 / 使用色 {used} / パレット {len(PALETTE)} 色")
+        if used >= len(PALETTE):
+            print("警告: パレットを使い切りました。以降は色が重複します", file=sys.stderr)
+        return 0
+
+    workspace_id = os.environ.get("CMUX_WORKSPACE_ID")
+
+    ident = identify(args.cwd)
+    if ident is None:
+        if args.print_only:
+            print("git 管理下ではありません")
+            return 0
+        # git 管理外へ移動した: 自分が付けた色なら外す。
+        # why 消す: 色が付いているならプロジェクトにいる、という意味を保つため
+        if workspace_id:
+            now = current_color(workspace_id)
+            if now is not None and now != UNREADABLE and is_ours(now):
+                run_cmux(
+                    ["workspace-action", "--action", "clear-color",
+                     "--workspace", workspace_id]
+                )
+        return 0
+    repo, worktree = ident
+    assign = load_assignments()
+    color, is_new = pick_color(repo, assign)
+
+    if args.print_only:
+        kind = "親リポ" if worktree == repo else "worktree"
+        state = "新規割り当て (未保存)" if is_new else "記録済み"
+        print(f"リポジトリ: {repo}")
+        print(f"割り当て  : {state}")
+        print(f"worktree  : {worktree} ({kind})")
+        print(f"色        : {color}")
+        return 0
+
+    if not workspace_id:
+        return 0
+
+    now = current_color(workspace_id)
+    if not args.force:
+        # 読み取れなかったときは触らない (未設定と決めつけて手動の色を潰さない)
+        if now == UNREADABLE:
+            return 0
+        # 自分が付けた色は付け替えてよい。手で付けた色は尊重する
+        if now is not None and not is_ours(now):
+            return 0
+        # why 大小文字を揃えて比べる: is_ours は正規化しているのにここが素の一致だと、
+        #   cmux が小文字の hex を返す形式に変わった瞬間「既に望みの色」が永久に
+        #   偽になり、シェル起動のたびに同じ色を set-color し直す
+        if now is not None and now.upper() == color.upper():
+            return 0
+
+    # why 着色の直前に保存する: 先に保存すると、着色に失敗した (cmux 未起動等)
+    #   リポジトリまで色を予約してパレットを食い潰す。逆に保存しないと、次回の
+    #   起動が同じ色を「未使用」と見て別リポジトリへ渡してしまう
+    if is_new:
+        assign[repo] = color
+        save_assignments(assign)
+
+    run_cmux(
+        [
+            "workspace-action",
+            "--action",
+            "set-color",
+            "--color",
+            color,
+            "--workspace",
+            workspace_id,
+        ]
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

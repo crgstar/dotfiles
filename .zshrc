@@ -90,5 +90,39 @@ zstyle ':fzf-tab:complete:(-command-|-parameter-|-brace-parameter-|export|unset|
 # why: 未クローンのマシンで毎回 source エラーを出さないよう存在ガードする（clone は setup.sh が担う）
 [ -f ~/projects/fzf-tab/fzf-tab.plugin.zsh ] && source ~/projects/fzf-tab/fzf-tab.plugin.zsh
 
+# cmux のワークスペースに、cwd の git リポジトリ名から決めた色を着ける。
+# シェル起動時と、cd でリポジトリを跨いだときに追従する。
+#
+# why &! (バックグラウンド + disown): cmux CLI を 2 回叩くので、前景で待つと
+#   シェル起動と cd が数十 ms 伸びる。色が着くのが一瞬遅れても困らない。
+if [[ -n "$CMUX_WORKSPACE_ID" ]] && (( $+commands[cmux-workspace-color] )); then
+  # why 初期値を空文字にしない: 「非 git ディレクトリで起動した」ケースと区別が
+  #   付かず、起動直後の 1 回が走らなくなる。実パスに現れない値を置く
+  typeset -g _CMUX_COLOR_ROOT=$'\0'
+
+  _cmux_workspace_color() {
+    # why 前回のリポジトリルート配下にいる間は git を叩かない: 同一リポジトリ内の
+    #   cd は頻繁なので、文字列の前方一致だけで抜ける。ルートを跨いだときだけ解決する
+    # why -n を先に見る: 非 git ディレクトリへ移動すると _CMUX_COLOR_ROOT は空になり、
+    #   前方一致のパターンが `/*` に縮んで**すべての絶対パス**に当たる。ガード無しだと
+    #   一度 /tmp 等へ寄った後は cd しても二度と色が付き直さない
+    if [[ -n "$_CMUX_COLOR_ROOT" ]] \
+       && [[ "$PWD" == "$_CMUX_COLOR_ROOT" || "$PWD" == "$_CMUX_COLOR_ROOT"/* ]]; then
+      return
+    fi
+    local root
+    root="$(command git rev-parse --show-toplevel 2>/dev/null)"
+    # why 解決結果が前と同じなら何もしない: 非 git ディレクトリ間の移動
+    #   (/tmp -> /var 等) で毎回 cmux CLI を起動しないため。どちらも空文字になる
+    [[ "$root" == "$_CMUX_COLOR_ROOT" ]] && return
+    _CMUX_COLOR_ROOT="$root"
+    cmux-workspace-color >/dev/null 2>&1 &!
+  }
+
+  autoload -Uz add-zsh-hook
+  add-zsh-hook chpwd _cmux_workspace_color
+  _cmux_workspace_color
+fi
+
 # 環境別の追加設定を読み込む
 [[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"

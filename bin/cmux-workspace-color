@@ -184,7 +184,9 @@ def load_assignments() -> dict[str, str]:
     return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
 
 
-def save_assignments(assign: dict[str, str]) -> bool:
+def save_assignments(
+    assign: dict[str, str], new_repos: tuple[str, ...] = ()
+) -> bool:
     """atomic に書く。書けなくても致命ではないので bool を返すだけ。
 
     why 書く直前にディスクを読み直す: シェル起動ごとに走るので、cmux が複数の
@@ -193,11 +195,25 @@ def save_assignments(assign: dict[str, str]) -> bool:
     「未使用」に見えるので別のリポジトリへ配られ、色が重複する。既にディスクにある
     割り当てを先着として優先し、こちらの新規分だけを足す (assign も同じ内容に揃える)。
 
+    why 自分の新規分はマージ後に取り直す: 先着を優先するだけでは重複を防げない。
+    同時に走る 2 プロセスはどちらも古いスナップショットに対して pick_color を回すので、
+    互いの新規分が used に入らず同じ色を選びうる (第一希望が衝突する場合だけでなく、
+    片方の probe 先を他方が先に取った場合も起きる)。一度記録されると以降は
+    「記録済み」として固定されるため自然には解消しない。new_repos に渡した分だけ、
+    ディスクをマージした表に対して選び直す。
+
     why tmp 名にプロセス ID を入れる: 固定名だと同時実行が同じ一時ファイルを書き合い、
     書きかけの中身を os.replace で本番へ持っていく。
     """
-    for repo, existing in load_assignments().items():
-        assign[repo] = existing
+    disk = load_assignments()
+    assign.update(disk)
+    for repo in new_repos:
+        # 先着が同じリポジトリを決めていたら、その色に従う (記録を 1 つに収める)
+        if repo in disk:
+            continue
+        assign.pop(repo, None)
+        color, _ = pick_color(repo, assign)
+        assign[repo] = color
     tmp = ASSIGN_FILE.with_name(f"{ASSIGN_FILE.name}.{os.getpid()}.tmp")
     try:
         ASSIGN_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -295,9 +311,11 @@ def main() -> int:
         assign = load_assignments()
         repos = enumerate_repos()
         added = assign_missing(assign, repos)
-        if added and not save_assignments(assign):
+        if added and not save_assignments(assign, tuple(r for r, _ in added)):
             print(f"error: {ASSIGN_FILE} に書けませんでした", file=sys.stderr)
             return 1
+        # 保存時に取り直された色があるので、報告は保存後の記録から作る
+        added = [(repo, assign[repo]) for repo, _ in added]
         print(f"リポジトリ {len(repos)} 件を確認。{len(added)} 件に新しく色を割り当てました")
         for repo, color in added:
             print(f"  {color}  {repo}")
@@ -358,8 +376,11 @@ def main() -> int:
     #   リポジトリまで色を予約してパレットを食い潰す。逆に保存しないと、次回の
     #   起動が同じ色を「未使用」と見て別リポジトリへ渡してしまう
     if is_new:
-        assign[repo] = color
-        save_assignments(assign)
+        save_assignments(assign, (repo,))
+        # why 保存後の値で塗る: 同時に走った別プロセスが先に同じ色を取っていた場合、
+        #   save_assignments が別の色へ取り直している。ここで手元の第一希望を使うと
+        #   記録と実際のワークスペース色が食い違ったまま残る
+        color = assign[repo]
 
     run_cmux(
         [

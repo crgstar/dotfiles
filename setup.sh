@@ -840,6 +840,20 @@ cmux_enable_automation_socket() {
     return
   fi
 
+  # why 書き換えの前に警告する: 何をされたか事後に知るのでは遅い。非対話実行
+  #   (Claude / CI) でもログの並びが「これから緩める」→「緩めた」になるので、
+  #   途中で失敗した場合も「緩めようとした」ことが残る
+  echo ""
+  echo "警告: cmux の automation.socketControlMode を '$want' に設定します。"
+  echo "      これは cmux の socket 接続制限を既定 (cmuxOnly) から緩めます。同じ macOS"
+  echo "      ユーザーで動く任意のプロセスが cmux を操作できるようになります"
+  echo "      (cmux send でターミナルに文字を送れるため、実質的に任意コマンド実行の"
+  echo "      経路が開きます)。socket ファイル自体は 0600 のままで他ユーザーは触れません。"
+  echo "      緩めたくない場合はこの後 $config を編集して automation.socketControlMode を"
+  echo "      消してください (または cmuxOnly に戻す)。その場合 cmux-pill-watcher は"
+  echo "      動かなくなります (ログに接続エラーが出ます)"
+  echo ""
+
   # why 書き換え前に .bak: 全文書き戻し (open(path,"w")) なので途中で失敗すると
   # 6KB のテンプレートごと失う。cmux 自身のエージェント向け手順も
   # 「編集前にタイムスタンプ付き .bak を取れ」と明示している (cmux docs settings)
@@ -911,15 +925,9 @@ open(path, "w").write(raw[:pos] + block + raw[pos:])
     else
       echo "注意: cmux reload-config に失敗しました。cmux を再起動すると反映されます"
     fi
-    echo ""
-    echo "警告: cmux の automation.socketControlMode を '$want' に設定しました。"
-    echo "      これは cmux の socket 接続制限を既定 (cmuxOnly) から緩めます。同じ macOS"
-    echo "      ユーザーで動く任意のプロセスが cmux を操作できるようになります"
-    echo "      (cmux send でターミナルに文字を送れるため、実質的に任意コマンド実行の"
-    echo "      経路が開きます)。socket ファイル自体は 0600 のままで他ユーザーは触れません。"
-    echo "      戻す: $config の automation.socketControlMode を消す (または cmuxOnly に戻す)"
-    echo "      その場合 cmux-pill-watcher は動かなくなります (ログに接続エラーが出ます)"
-    echo ""
+    # why 事後は 1 行だけ: 内容は書き換え前の警告で出している。同じ文を 2 度出すと
+    #   どちらが実際の結果なのか読み取れなくなる
+    echo "cmux: automation.socketControlMode を '$want' に設定しました (バックアップ: $backup)"
   else
     # why 戻す: python が途中で落ちると書きかけの全文が残りうる。.bak を残すだけでは
     #   cmux が壊れた設定を読み続ける

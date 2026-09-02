@@ -139,6 +139,11 @@ def reconcile(workspace_id: str) -> None:
     ok = run_cmux(args)
     if ok is not None:
         log(f"{workspace_id[:8]} {value}: {color or 'なし'} -> {want}")
+    else:
+        # why 失敗も残す: 黙って諦めると「Needs input が来ていない」のと区別が付かない。
+        #   CMUX_PILL_NEEDS_INPUT_COLOR に hex 以外を入れた・set-status の引数仕様が
+        #   変わった場合、常駐は無働きなのにログは起動行だけになり切り分けできない
+        log(f"warn: set-status が失敗 {workspace_id[:8]} {value} -> {want}")
 
 
 class Debouncer:

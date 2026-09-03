@@ -230,6 +230,10 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/memory-guide-gate.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/cd-outside-workspace-gate.sh"
           }
         ]
       },

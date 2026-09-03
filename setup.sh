@@ -995,10 +995,15 @@ target_cmux_pill() {
 #   要求するので bare には一致しない。bare を落とすと hook だけが静的 allow より狭くなり、
 #   `gh api ... | head` のようにパイプ末尾へ引数なしで置いた道具 (head / cat / sort /
 #   uniq / pwd 等) が未知セグメント扱いになって、コマンド全体が ask に落ちる。
+#   why 2 語目以降に `-x` / `--xxx` / `{}` を許す: `Bash(xargs -n1 ls *)` /
+#   `Bash(xargs -I{} cat *)` のようなフラグ入りエントリを除外していたため、静的
+#   allow には載っているのに hook 白名簿には 1 行も入らず、`gh api ... | xargs -I{} ls`
+#   だけが ask に落ちていた (hook が静的 allow より狭い状態)。xargs はオプション解釈が
+#   ユーティリティ名で終わるので、末尾 `*` はユーティリティ側の引数にしか当たらず、
+#   派生した glob は静的 allow と同じ範囲に収まる。
 #   除外対象 (内部に `*` や `/` を含む複合パターンは bash glob として 1 セグメント
-#   照合できない。単語が `-` で始まるパターンは上の抽出正規表現の単語形に合わない。
-#   いずれも hook の責務外):
-#     Bash(cat */.mirugit/*) / Bash(xargs -n1 ls *) / Bash(xargs -0 grep *)
+#   照合できない。hook の責務外):
+#     Bash(cat */.mirugit/*) / Bash(pkill -f mirugit*) / Bash(npx eslint * --no-fix *)
 #   静的 allow ⊇ hook 許容範囲 が build-time に保証されるので、2 箇所メンテによる
 #   drift を避ける。
 # why 抽出プログラムを変数に出す: 生成 (target_prefixes) と検証
@@ -1007,7 +1012,7 @@ target_cmux_pill() {
 PREFIX_DERIVE_JQ='
   .permissions.allow[]?
   | select(type == "string")
-  | (capture("^Bash\\((?<cmd>[A-Za-z][A-Za-z0-9_-]*(?: \\+?[A-Za-z][A-Za-z0-9_-]*)*)(?<suf>:\\*| \\*)?\\)$")? // empty)
+  | (capture("^Bash\\((?<cmd>[A-Za-z][A-Za-z0-9_-]*(?: (?:\\+?[A-Za-z][A-Za-z0-9_-]*|-{1,2}[A-Za-z0-9][A-Za-z0-9_{}-]*|\\{\\}))*)(?<suf>:\\*| \\*)?\\)$")? // empty)
   | if .suf then [.cmd, "\(.cmd) *"] else [.cmd] end
   | .[]
 '
@@ -1047,12 +1052,21 @@ run_prefix_self_test() {
     "Bash(gws sheets +read *)",
     "Bash(cat */.mirugit/*)",
     "Bash(xargs -n1 ls *)",
+    "Bash(xargs -0 grep *)",
+    "Bash(xargs -I{} echo *)",
+    "Bash(xargs -I {} cat *)",
+    "Bash(pkill -f mirugit*)",
+    "Bash(copilot --help*)",
+    "Bash(npx eslint * --no-fix *)",
     "Bash(git -C * diff *)",
     "Read(//x/**)",
     "WebFetch(domain:example.com)"
   ]}}'
   # 期待値は「除外対象は 1 行も出さない」まで含めた完全一致で書く。部分一致だと
   # 除外が壊れて余計な行が増えても気づけない。
+  # xargs 系はフラグ入りでも派生させる (静的 allow に載っているので、外すと hook だけが
+  # 狭くなる)。単語に glob メタが付く形 (pkill -f mirugit* / copilot --help* /
+  # npx eslint * --no-fix * / git -C * diff *) は引き続き 1 行も出さない。
   want="$(printf '%s\n' \
     'env' \
     'gh pr view' \
@@ -1064,7 +1078,15 @@ run_prefix_self_test() {
     'head' \
     'head *' \
     'mkdir' \
-    'mkdir *')"
+    'mkdir *' \
+    'xargs -0 grep' \
+    'xargs -0 grep *' \
+    'xargs -I {} cat' \
+    'xargs -I {} cat *' \
+    'xargs -I{} echo' \
+    'xargs -I{} echo *' \
+    'xargs -n1 ls' \
+    'xargs -n1 ls *')"
   got="$(printf '%s' "$fixture" | jq -r "$PREFIX_DERIVE_JQ" | sort -u)"
 
   if [ "$got" = "$want" ]; then

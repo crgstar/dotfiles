@@ -99,6 +99,8 @@
       "Bash(xargs -I {} cat *)",
       "Bash(xargs -I{} grep *)",
       "Bash(xargs -I {} grep *)",
+      "Bash(xargs -I{} echo *)",
+      "Bash(xargs -I {} echo *)",
       "Bash(xargs -0 ls *)",
       "Bash(xargs -0 grep *)",
       "Bash(open *)",

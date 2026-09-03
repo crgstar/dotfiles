@@ -30,14 +30,18 @@ description: >
 コマンドは原文をファイルへ貼り、組み立て直さない。文字列連結や引用符の書き換えで前半の
 セグメントが落ちても出力は自然に見えるので、別のコマンドを検査したまま結論を出してしまう。
 
+確認ダイアログや会話ログからのコピーで行頭に枠線 (`│`) が付いていても、そのままでよい。
+下記の `jq -Rr sub` が落とす。ただし枠内で折り返された改行は残るので、元が 1 行なら手で 1 行に戻す。
+
 ```bash
 set -e
 cd "$(git rev-parse --show-toplevel)"
 [ -f .claude/settings.merged.json ] || { echo "settings.merged.json が無い。先に ./setup.sh <env>"; exit 1; }
 TMP=$(mktemp -d "${TMPDIR:-/tmp/}perm-XXXXXX")
-cat > "$TMP/cmd.txt" <<'CMD_EOF'
+cat > "$TMP/raw.txt" <<'CMD_EOF'
 <問題のコマンドをそのまま貼る>
 CMD_EOF
+jq -Rr 'sub("^[ \t]*│ ?";"")' < "$TMP/raw.txt" > "$TMP/cmd.txt"
 jq -Rs --arg cwd "$PWD" '{tool_name:"Bash",tool_input:{command:(sub("\n$";""))},cwd:$cwd,session_id:"triage"}' \
   < "$TMP/cmd.txt" > "$TMP/in.json"
 echo "検査対象:"; cat "$TMP/cmd.txt"; echo "----"
@@ -123,11 +127,12 @@ jq -j 'select(.type=="assistant") | .message.content[]?
        | select(test("<対象パターン>")) | (., "@@@SPLIT@@@")' \
   $(cat "$LOG/sessions.txt") 2>/dev/null > "$LOG/all.txt"
 mkdir -p "$LOG/cmds"
-awk -v dir="$LOG/cmds" 'BEGIN{RS="@@@SPLIT@@@"} length($0)>0 { f=dir"/c"NR".txt"; printf "%s", $0 > f; close(f) }' "$LOG/all.txt"
+awk -v dir="$LOG/cmds" 'BEGIN{RS="@@@SPLIT@@@"} length($(0))>0 { f=dir"/c"NR".txt"; printf "%s", $(0) > f; close(f) }' "$LOG/all.txt"
 ls "$LOG/cmds" | wc -l
 ```
 
 区切りに NUL を使わない。ツール入力の検証で制御文字として弾かれる。
+awk のレコード参照は `$(0)` と書く。括弧を外した形は、スキルをスラッシュコマンドで起動したとき引数に展開されて潰れる。
 
 取り出したコマンドを変更前後の hook それぞれに流し、判定が変わった件数を数える。変更前の hook は
 `git show HEAD:<path> > <同じディレクトリ>/<name>.old.sh` で取り出す。`lib/` を相対で解決するので

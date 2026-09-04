@@ -19,9 +19,9 @@
 #   静的 allow ⊇ hook 許容範囲 を build-time に保証する。
 #   `git -C * status *` のような複合パターンは抽出から除外している。
 #
-# Scope: gh api と `git -C <path> <ホワイトリスト済みサブコマンド>` の auto-allow を担う。
-# どんなに safe-prefix を満たしていても、この 2 つを 1 つも含まない
-# コマンドは passthrough し、静的ルールの ask 判定に委ねる。
+# Scope: gh api ・ `git -C <path> <ホワイトリスト済みサブコマンド>` ・ git grep の
+# auto-allow を担う。どんなに safe-prefix を満たしていても、この 3 つを 1 つも
+# 含まないコマンドは passthrough し、静的ルールの ask 判定に委ねる。
 #
 # Usage:
 #   1) フック本体: stdin に Claude Code が渡す JSON を受け取り、
@@ -270,6 +270,18 @@ has_unsafe_metachar() {
             [ "${s:$((i+1)):1}" = $'\n' ] && return 0
             i=$((i+1))
           fi
+          ;;
+        '{')
+          # why リテラル `{}` 以外のクォート外ブレースを落とす: bash のブレース展開は
+          # `{a,b}` / `{1..3}` の形で 1 語を複数語へ増やすので、トークンの先頭を `{` に
+          # するだけでフラグを bare トークンに偽装できる。`git grep {-O,-O}'echo x' pat`
+          # は tokenize_quoted には `{-O,-O}echo x` という bare トークン 1 個に見えるが、
+          # 実 bash では `-Oecho x` へ展開されて pager が起動する (echo の実行を実測)。
+          # 同じ手で `gh api {-X,-X}DELETE ...` / `git -C {p,p} ...` のフラグ検査も
+          # すり抜ける。展開が起きない `{}` だけは通す (`xargs -I{} cat` /
+          # `find -exec ... {}` が静的 allow に載っているため)。
+          [ "${s:$((i+1)):1}" = '}' ] || return 0
+          i=$((i+1))
           ;;
         '$'|'`'|'&'|'('|')'|'<'|'>') return 0 ;;
         *) [ "$ch" = $'\n' ] && return 0 ;;
@@ -583,6 +595,100 @@ is_safe_git_c() {
   return 1
 }
 
+# `git grep ...` を構造判定する。
+# 0: safe / 1: not safe
+#
+# why 静的 allow ではなく hook で見るか:
+#   `Bash(git grep *)` は glob 照合なので `*` が空白をまたぎ、
+#   `git grep -O'sh -c "任意コマンド"' pattern` にも一致する。-O
+#   (--open-files-in-pager) は「マッチしたファイルを pager で開く」オプションだが、
+#   pager として渡した文字列をシェル経由で起動するので、引数だけで任意コマンドが
+#   走る (`git grep -O'echo X' pat` で echo の実行を実測)。is_safe_git_c と同じく
+#   glob では排除できないため hook 側の構造判定に倒す。
+#
+# why ブラックリストではなくホワイトリスト:
+#   is_safe_sed と同じ理由。「-O だけ落とす」形にすると、git が将来別の実行経路を
+#   持つオプションを増やしたときに黙って穴が開く。受理するフラグを列挙し、
+#   知らないフラグは一律 unsafe に倒せば、増えた側は自動的に落ちる。
+#
+# why 値を取るフラグを受理しないか:
+#   `-e <pattern>` / `-f <file>` / `-C <n>` / `--max-depth <n>` は「次のトークンは
+#   何か」の解釈が要る。arity を取り違えると値の位置に置いたフラグが bare トークン
+#   扱いになって検査をすり抜ける (is_safe_gh_rest が抱えている誤差と同種)。
+#   解釈そのものを不要にするため値を取らないフラグだけを受理する。実ログ上の
+#   使用実績も -n / -l / pathspec の `--` / rev 指定に収まっており実害が無い。
+#
+# why textconv 系を入れないか:
+#   --textconv はリポジトリの .gitattributes に書かれたフィルタを起動する。
+#   `git diff` が diff.external で同じ経路を持つのと同種だが、あちらは -C なし版が
+#   静的 allow に載っている既存の受け入れ。ここは新規に開ける口なので広げない。
+is_safe_git_grep() {
+  local seg="$1"
+
+  # why トークン化前に改行を弾く: is_safe_sed / is_safe_git_c と同じ罠。
+  # tokenize_quoted の出力が改行区切りなのでトークン境界がずれ、
+  # クォート内改行を挟んだ `-O` がフラグ位置から外れて見える。
+  case "$seg" in
+    *$'\n'*) return 1 ;;
+  esac
+
+  local t first=1 saw_grep=0 rest ch
+  while IFS= read -r t; do
+    if [ "$first" = 1 ]; then
+      first=0
+      # `/usr/bin/git` / `command git` / `sudo git` は対象外 (素の git だけを見る)。
+      [ "$t" = 'git' ] || return 1
+      continue
+    fi
+    if [ "$saw_grep" = 0 ]; then
+      # `git -c core.pager=x grep` のようにサブコマンド前へ差し込む形を弾く。
+      [ "$t" = 'grep' ] || return 1
+      saw_grep=1
+      continue
+    fi
+    case "$t" in
+      # 値を取らない long form だけを列挙する。
+      --cached|--no-cached|--index|--no-index|--untracked|--no-untracked|\
+      --exclude-standard|--no-exclude-standard|--recurse-submodules|\
+      --no-recurse-submodules|--invert-match|--ignore-case|--word-regexp|--text|\
+      --extended-regexp|--basic-regexp|--fixed-strings|--perl-regexp|\
+      --line-number|--column|--full-name|--files-with-matches|--name-only|\
+      --files-without-match|--null|--only-matching|--count|--break|--heading|\
+      --show-function|--function-context|--quiet|--all-match|--recursive)
+        ;;
+      # 色指定は値を取りうるが `=` 連結形なので次トークンを食わない。
+      --color|--no-color|--color=*)
+        ;;
+      # pathspec 区切り。
+      --)
+        ;;
+      # `-3` は -C 3 の shortcut。数字だけなら次トークンを食わない。
+      -[0-9]*)
+        case "$t" in *[!0-9-]*) return 1 ;; esac
+        ;;
+      # 連結短縮形 (`-ni` 等)。全文字が値を取らないフラグのときだけ受理する。
+      # why 1 文字ずつ見るか: `-nO` のように安全な文字へ紛れ込ませる形を落とすため。
+      -*)
+        rest="${t#-}"
+        [ -n "$rest" ] || return 1
+        while [ -n "$rest" ]; do
+          ch="${rest%"${rest#?}"}"
+          rest="${rest#?}"
+          case "$ch" in
+            n|i|w|a|I|E|G|F|P|H|h|l|L|z|o|c|v|q|p|W|r) ;;
+            *) return 1 ;;
+          esac
+        done
+        ;;
+      # bare トークン (パターン / rev / pathspec) は読み取り対象を指すだけなので自由。
+      *)
+        ;;
+    esac
+  done < <(tokenize_quoted "$seg")
+
+  [ "$saw_grep" = 1 ]
+}
+
 # 単一セグメント（trim 済み前提）が safe-prefix に該当するか判定する。
 # 0: safe / 1: not safe
 is_safe_segment() {
@@ -648,6 +754,11 @@ is_safe_segment() {
       is_safe_git_c "$seg" && return 0
       return 1
       ;;
+    # git grep も静的 allow には載せない (-O が任意コマンドを起動するため)。
+    'git grep'|'git grep '*)
+      is_safe_git_grep "$seg" && return 0
+      return 1
+      ;;
   esac
 
   # それ以外は generated prefix list に対する glob match で判定。
@@ -663,8 +774,8 @@ is_safe_segment() {
 }
 
 # コマンド全体を分解し、全セグメント safe かつ「hook が責務を負う対象」
-# (gh api / git -C) を 1 つ以上含むときだけ allow。どちらも含まないコマンドは
-# 静的ルールに委譲する（このフックの役割外）。
+# (gh api / git -C / git grep) を 1 つ以上含むときだけ allow。いずれも含まない
+# コマンドは静的ルールに委譲する（このフックの役割外）。
 evaluate_command() {
   local cmd="$1"
   local has_target=0
@@ -681,7 +792,7 @@ evaluate_command() {
       return 1
     fi
     case "$seg" in
-      'gh api '*|'git -C '*) has_target=1 ;;
+      'gh api '*|'git -C '*|'git grep'|'git grep '*) has_target=1 ;;
     esac
   done < <(split_segments "$cmd")
 
@@ -689,7 +800,7 @@ evaluate_command() {
 }
 
 emit_allow() {
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","message":"compound read-only: gh api (no write flags; graphql without mutation) / git -C <path> <allowlisted subcommand> + segments in safe-prefix list"}}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","message":"compound read-only: gh api (no write flags; graphql without mutation) / git -C <path> <allowlisted subcommand> / git grep (no pager-exec flags) + segments in safe-prefix list"}}}'
 }
 
 emit_passthrough() {
@@ -748,6 +859,13 @@ run_self_test() {
     'mkdir *'
     'bun test'
     'bun test *'
+    # フラグ入りの多語サブコマンド (Bash(xargs -I{} cat *) 等の派生)。
+    # `{}` を含む prefix が実在するので、クォート外ブレースの判定を締めるときの
+    # 巻き添えをここで検出する。
+    'xargs -I{} cat'
+    'xargs -I{} cat *'
+    'xargs -I {} cat'
+    'xargs -I {} cat *'
   )
 
   local fail=0
@@ -892,6 +1010,60 @@ s/a/b/w /tmp/pwned'"
   assert_unsafe 'git -C の引数に改行' "git -C /tmp log --grep='a
 b'"
   assert_unsafe 'git -C 出力を任意パスへリダイレクト' 'git -C /tmp status > /Users/u/.zshrc'
+
+  # git grep: 値を取らないフラグと bare トークン (パターン / rev / pathspec) だけのときに限り allow
+  assert_safe 'git grep -n' 'git grep -n needle'
+  assert_safe 'git grep -n + pathspec + head (実ログの形)' 'git grep -n "needle" -- . | head -20'
+  assert_safe 'git grep -l + head (実ログの形)' 'git grep -l "needle" | head -20'
+  assert_safe 'git grep rev 指定 + pathspec 複数' 'git grep -n "a\|b" origin/topic -- src lib | grep -v test'
+  assert_safe 'git grep 連結短縮形' 'git grep -ni needle'
+  assert_safe 'git grep 引数なし' 'git grep'
+  assert_safe 'git grep --no-index' 'git grep --no-index needle /tmp/dir'
+  assert_safe 'git grep -3 (-C 3 の shortcut)' 'git grep -3 needle'
+  assert_safe 'git grep --heading --break' 'git grep --heading --break -n needle'
+  assert_safe 'git grep --color=always' 'git grep --color=always -n needle'
+  assert_safe 'git grep + 2>/dev/null' 'git grep -n needle 2>/dev/null'
+  assert_safe 'git grep && echo の複合' 'git grep -n needle && echo done'
+  assert_safe 'git grep と gh api の混在' 'git grep -n needle && gh api repos/foo/bar/pulls/1'
+
+  # -O (--open-files-in-pager) は pager として渡した文字列をシェル起動するので任意コマンド実行になる
+  assert_unsafe 'git grep -O 連結形' "git grep -O'echo pwned' needle"
+  assert_unsafe 'git grep -O 単体' 'git grep -O needle'
+  assert_unsafe 'git grep -O を安全な文字に紛れ込ませる' 'git grep -nO needle'
+  assert_unsafe 'git grep --open-files-in-pager' 'git grep --open-files-in-pager needle'
+  assert_unsafe 'git grep --open-files-in-pager=<pager>' 'git grep --open-files-in-pager=sh needle'
+
+  # 値を取るフラグは arity 解釈が要るので受理しない
+  assert_unsafe 'git grep -e (値を取る)' 'git grep -e needle'
+  assert_unsafe 'git grep -f (パターンファイル)' 'git grep -f /tmp/pats'
+  assert_unsafe 'git grep -C (context 数)' 'git grep -C 3 needle'
+  assert_unsafe 'git grep --max-depth' 'git grep --max-depth 2 needle'
+  assert_unsafe 'git grep --threads' 'git grep --threads 4 needle'
+  assert_unsafe 'git grep -m (max-count)' 'git grep -m 5 needle'
+
+  # textconv はリポジトリ設定のフィルタを起動するので新規に開けない
+  assert_unsafe 'git grep --textconv' 'git grep --textconv needle'
+
+  # 素の git 以外・サブコマンド前差し込み・危険な連結
+  assert_unsafe 'git grep のサブコマンド前に -c 差し込み' "git -c core.pager='sh -c x' grep needle"
+  assert_unsafe 'sudo git grep' 'sudo git grep needle'
+  assert_unsafe 'パス付き git grep' '/usr/bin/git grep needle'
+  assert_unsafe 'git grep と rm の連結' 'git grep -n needle && rm -rf /tmp/x'
+  assert_unsafe 'git grep とコマンド置換' 'git grep -n $(cat /tmp/p)'
+  assert_unsafe 'git grep 出力を任意パスへリダイレクト' 'git grep -n needle > /Users/u/.zshrc'
+  assert_unsafe 'git grep の引数に改行' "git grep -n 'a
+b'"
+
+  # クォート外のブレース展開はトークン先頭を `{` にしてフラグを bare トークンへ偽装できる。
+  # `{}` (展開されないリテラル) だけは xargs -I{} / find -exec 用に通す。
+  assert_unsafe 'ブレース展開で git grep -O を隠す' "git grep {-O,-O}'echo pwned' needle"
+  assert_unsafe 'ブレース展開で gh api のメソッドを隠す' 'gh api {-X,-X}DELETE repos/foo/bar/issues/1'
+  assert_unsafe 'ブレース展開で git -C のパス位置を隠す' 'git -C {/tmp,/tmp} status'
+  assert_unsafe 'ブレース連番展開' 'gh api repos/foo/bar/issues/{1..3}'
+  assert_unsafe '閉じないブレース' 'gh api repos/foo/bar/issues/{1'
+  assert_safe 'xargs -I{} (展開されないリテラル)' 'gh api repos/foo/bar/pulls/1 | xargs -I{} cat'
+  assert_safe 'xargs -I {} (展開されないリテラル)' 'gh api repos/foo/bar/pulls/1 | xargs -I {} cat'
+  assert_safe 'クォート内のブレース (jq)' "gh api repos/foo/bar/pulls/1 | jq '{a: .b}'"
 
   # gh api graphql: mutation を含まない参照クエリは -f query=... 付きでも allow
   assert_safe 'graphql introspection' "gh api graphql -f query='query { __type(name: \"ProjectV2SingleSelectField\") { fields { name type { name kind ofType { name } } } } }'"

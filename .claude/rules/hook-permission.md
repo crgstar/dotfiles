@@ -42,7 +42,7 @@ hook handler には `if` フィールドで permission rule 構文の絞り込�
 
 ## segment-allow.sh の safe-prefix 自動同期
 
-`gh api ... | jq ...` のような複合コマンドは、Claude Code が `&&`/`||`/`;`/`|` で分割して各セグメントごとに静的 allow を判定する。1 つでも未許可セグメントがあると全体 ask に倒れるため、PermissionRequest hook (`.claude/hooks/segment-allow.sh`) が全セグメントを safe-prefix リストと照合し、すべて safe かつ **hook が責務を負う対象 (`gh api` / `git -C`) を 1 つ以上含む**ときだけ allow を返す。
+`gh api ... | jq ...` のような複合コマンドは、Claude Code が `&&`/`||`/`;`/`|` で分割して各セグメントごとに静的 allow を判定する。1 つでも未許可セグメントがあると全体 ask に倒れるため、PermissionRequest hook (`.claude/hooks/segment-allow.sh`) が全セグメントを safe-prefix リストと照合し、すべて safe かつ **hook が責務を負う対象 (`gh api` / `git -C` / `git grep`) を 1 つ以上含む**ときだけ allow を返す。
 
 safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` が `permissions.allow` から自動生成する:
 
@@ -77,8 +77,9 @@ safe-prefix リスト (`~/.claude/hooks/segment-allow.prefixes`) は `setup.sh` 
   - GNU sed の `--sandbox`（`e`/`w`/`r` を実行前に拒否する）は BSD sed に無いので当てにできない
   - 最終行を表す `$` は `60,$p` の形で許可（シングルクォート内なのでクォート外の `$` を弾く判定とは衝突しない）。正規表現アドレス `/re/p` は区切り文字変更やエスケープの解釈が必要で「w / e が現れない」を機械的に言えないため対象外
   - **クォート内に改行を含むセグメントは無条件で unsafe**。`tokenize_quoted` は改行入りトークンでも出力を改行区切りにするので、`sed -n '1,5p<改行>w /tmp/x'` が「スクリプト `1,5p`」+「入力ファイル名 `w /tmp/x`」の 2 トークンに割れ、実際には sed の `w`（任意ファイルへの書き出し）や GNU の `e`（シェルコマンド実行）が allow で通ってしまう。`is_safe_gh_graphql` が mutation 判定をトークン化に依存させないのと同じ罠
-- さらに全セグメント共通で、クォート外に `& $ \` ( ) < >`・改行（行継続 `\<改行>` で持ち越されたもの。素の改行は上記のとおり分割済み）が現れたら prefix が何であれ unsafe に倒す（`&`・`$()`・バッククォート・リダイレクト等は末尾 glob の prefix 照合をすり抜けるため）。例外は 2 つ:
+- さらに全セグメント共通で、クォート外に `& $ \` ( ) < > {`・改行（行継続 `\<改行>` で持ち越されたもの。素の改行は上記のとおり分割済み）が現れたら prefix が何であれ unsafe に倒す（`&`・`$()`・バッククォート・リダイレクト等は末尾 glob の prefix 照合をすり抜けるため）。例外は下記:
   - `gh api ... > /tmp/...` への保存（実運用で多用するため。リダイレクト先が /tmp 配下リテラルのときのみ）
+  - リテラルの `{}`（bash のブレース展開は `{a,b}` / `{1..3}` の形でしか起きないので、`{}` は 1 語のまま残る）。`xargs -I{} cat` / `find -exec ... {}` が静的 allow に載っているため通す。逆に展開が起きる形を落とすのは、トークンの先頭を `{` にするだけでフラグを bare トークンに偽装できるため — `git grep {-O,-O}'sh -c cmd' pat` は hook のトークナイザには `{-O,-O}sh -c cmd` という 1 個の bare トークンに見えるが、実 bash では `-Osh -c cmd` へ展開されて pager 経由で任意コマンドが走る（実測。2026-09）。同じ手で `gh api {-X,-X}DELETE ...` のメソッド検査や `git -C {p,p} ...` のパス位置判定もすり抜ける
   - 単語として現れる副作用の無いリダイレクト（`2>&1` の fd 複製と、`2>/dev/null` / `1>/dev/null` / `&>/dev/null` / `>/dev/null` の出力破棄）。ファイル生成もコマンド実行も伴わず、`/dev/null` は書き込みが常に捨てられる特殊デバイスなのでリダイレクト先の変動もない。単語境界を要求するので `&>file` / `2>file` / `>&1` / `2>/dev/nullx` / `12>/dev/null` は従来通り検出される。空白入り（`2>& 1` / `2> /dev/null`。bash では合法）と、他のファイルリダイレクトとの併用は読み飛ばさず ask に落ちる
 
 ### git -C の構造判定 (`is_safe_git_c`)
@@ -116,6 +117,43 @@ allow を返す条件は、トークン分割した結果が下記すべてを�
 `diff.external` を書けばオプション無しの `git diff` でも任意コマンドが走る。
 permission ルールでこの経路は閉じられない。
 
+### git grep の構造判定 (`is_safe_git_grep`)
+
+`git grep` も静的 allow に載せない。`Bash(git grep *)` の `*` はコマンド文字列全体に対する
+glob なので空白をまたぎ、`git grep -O'sh -c "任意コマンド"' pattern` にも一致する。
+`-O` (`--open-files-in-pager`) は「マッチしたファイルを pager で開く」オプションだが、
+pager として渡した文字列をシェル経由で起動するため、引数だけで任意コマンドが走る
+(`git grep -O'echo X' pat` で echo の実行を実測。2026-09)。`git -C` と同じく glob では
+差し込みを排除できないので hook 側の構造判定に倒している。
+
+allow を返す条件は、トークン分割した結果が下記すべてを満たすとき:
+
+- 先頭トークンが素の `git`、次が `grep`。サブコマンド前への差し込み
+  (`git -c core.pager=x grep`) と `sudo git` / `/usr/bin/git` はここで落ちる
+- 以降のトークンが「値を取らないフラグ」「pathspec 区切りの `--`」「bare トークン
+  (パターン / rev / pathspec)」のいずれか。bare トークンは読み取り対象を指すだけなので自由
+- クォート内に改行を含むセグメントは無条件で unsafe (`is_safe_sed` / `is_safe_git_c` と同じ理由)
+
+**ブラックリストではなくホワイトリストにする。** 「`-O` だけ落とす」形にすると、git が将来
+別の実行経路を持つオプションを増やしたときに黙って穴が開く。受理するフラグを列挙して
+知らないものを一律 unsafe に倒せば、増えた側は自動的に落ちる (`is_safe_sed` と同じ判断)。
+
+**値を取るフラグ (`-e` / `-f` / `-C <n>` / `-A` / `-B` / `-m` / `--max-depth` / `--threads`) は
+受理しない。** 「次のトークンは何か」の解釈が要り、arity を取り違えると値の位置に置いた
+フラグが bare トークン扱いになって検査をすり抜ける (`is_safe_gh_rest` が抱えている誤差と同種)。
+解釈そのものを不要にするために落としている。実ログ上の使用実績も `-n` / `-l` / `--` /
+rev 指定に収まっており、実害は出ていない。
+
+**連結短縮形は 1 文字ずつ検査する。** `-ni` のような形を受理する一方、`-nO` のように安全な
+文字へ紛れ込ませる形を落とすため。
+
+`--textconv` は入れない。リポジトリの `.gitattributes` に書かれたフィルタを起動するので
+`git diff` の `diff.external` と同種だが、あちらは `-C` なし版が静的 allow に載っている
+既存の受け入れで、こちらは新規に開ける口なので広げない。
+
+未確認: `cd <path> && git grep ...` の形で handler の `if` (`Bash(git grep *)`) がマッチするか。
+マッチしなければ hook が起動せず静的 ask に落ちるだけなので、外れても安全側に倒れる。
+
 ### ヘッドレスで必要な `git -C` は実パスで allow に残す
 
 PermissionRequest hook はヘッドレスで発火しない。`reflect` は
@@ -132,13 +170,15 @@ PermissionRequest hook はヘッドレスで発火しない。`reflect` は
 ### 同じ hook を複数の `if` で登録する
 
 `if` は 1 handler に 1 ルールしか書けないので、`segment-allow.sh` は
-`Bash(gh api *)` と `Bash(git -C *)` の 2 handler で登録している。
+`Bash(gh api *)` ・ `Bash(git -C *)` ・ `Bash(git grep *)` の 3 handler で登録している。
 対象を増やすときは handler を足す (`if` に `&&` やリストは書けない)。
 
 ### メンテ手順
 
 - 新たに `gh api ... | <cmd> ...` を素通ししたい → `Bash(<cmd> *)` を allow に追加 → `./setup.sh <env>` で prefix 再生成
 - `git -C` で新たなサブコマンドを通したい → `is_safe_git_c` のホワイトリストに追加 (静的 allow ではなく hook 側)
+- `git grep` で新たなフラグを通したい → `is_safe_git_grep` のホワイトリストに追加。値を取るフラグを足すときは arity の解釈が要る点に注意 (現状は値を取らないフラグだけで閉じている)
+- `is_safe_git_c` のサブコマンド集合に `grep` を足さないこと。あちらは「サブコマンドより後ろのオプションは検査しない」方針なので、足すと `git -C <path> grep -O'任意コマンド'` が素通りする
 - hook ロジック側の self-test: `bash .claude/hooks/segment-allow.sh --self-test`
 - 派生規則側の self-test: `./setup.sh --self-test` (設定は書き換えない)。hook 側の self-test は SAFE_PREFIXES を自前で手書きしており実際の派生結果を見ないので、この 2 本は別物として両方回す。片方だけだと「hook だけが静的 allow より狭い」状態が緑で通る
 

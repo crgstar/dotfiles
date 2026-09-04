@@ -205,6 +205,11 @@
           },
           {
             "type": "command",
+            "command": "bash $HOME/.claude/hooks/segment-allow.sh",
+            "if": "Bash(git grep *)"
+          },
+          {
+            "type": "command",
             "command": "bash $HOME/.claude/hooks/scratchpad-rm-allow.sh",
             "if": "Bash(rm *)"
           }

@@ -160,7 +160,10 @@ has_relative_path_arg() {
 # 見逃しは静的ルールの ask に落ちるだけで安全側。
 may_need_judgement() {
   local cmd="$1"
-  [[ "$cmd" =~ (^|[[:space:]])cd[[:space:]] ]] || return 1
+  # why 区切り文字も先行文字に数える: bash では `echo x;cd /outside` のように
+  # 区切りの直後へ空白なしで書けるが、空白と行頭だけを見ていると足切りで落ちて
+  # hook が起動せず、差し戻したいはずの形がそのまま確認ダイアログになる。
+  [[ "$cmd" =~ (^|[[:space:]]|[\;\&\|])cd[[:space:]] ]] || return 1
   # why heredoc を含むなら丸ごと対象外: 本文は実行されないただの文字列だが、
   # split_with_separator は `<<` を解釈しないので中身が実コマンドとして並んで
   # 見える。判定できない形は手を引く (prefer-jq-over-python.sh と同じ)。
@@ -270,6 +273,7 @@ run_self_test() {
   assert_deny '外部 cd + 相対ファイル' "cd $out && grep -c . CLAUDE.md"
   assert_deny '外部 cd + 相対ディレクトリ' "cd $out && ls src"
   assert_deny '; 区切り' "cd $out ; cat CLAUDE.md"
+  assert_deny '区切り直後の cd (空白なし)' "echo start;cd $out && cat CLAUDE.md"
   assert_deny '深い相対パス' "cd $out && cat specs/README.md"
   assert_deny 'パイプの先で参照' "cd $out && grep -rn x src | head -30"
   assert_deny '相対パスで外部へ cd' "cd ../outside/repo && cat CLAUDE.md" "$ws"

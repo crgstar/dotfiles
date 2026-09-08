@@ -32,6 +32,23 @@ hook handler には `if` フィールドで permission rule 構文の絞り込�
 
 `Bash(git -C * diff *)` のように `*` を 2 つ以上含むパターンは素の glob として評価され、末尾の ` *` が「スペース + 1 文字以上」を要求する。そのため末尾引数なしの `git -C /path diff` にはマッチせず ask に落ちる（`git -C /path diff --stat` は通る。2026-06 実測）。単一ワイルドカードの `Bash(git status *)` 形式では公式ドキュメント通り bare `git status` にもマッチするので、この問題は複数ワイルドカード時のみ。対策として bare 実行があり得る `git -C` 系サブコマンドには末尾 ` *` なしの版 (`Bash(git -C * diff)` 等) を allow に併記している。starred 版と重複に見えるが消さないこと。
 
+## 安全側フラグを glob に埋めた allow は末尾 ` *` を付けない
+
+`Bash(gh skill publish --dry-run *)` のように「安全なフラグを prefix に固定して、残りを
+末尾 ` *` に委ねる」書き方は成立しない。末尾 `*` は空白をまたいで任意の引数列に一致するので、
+同じフラグをもう一度指定できてしまう。cobra/pflag は後勝ちなので
+`gh skill publish --dry-run --dry-run=false --tag v9.9.9 .` が同じ glob に一致し、
+検証だけのはずが実際の publish（GitHub release 作成 + リポジトリへの topic 追加）になる。
+`--dry-run=false` が受理されることは実測済み（未知フラグは `unknown flag` で落ちるので、
+落ちないこと自体が受理の証拠。2026-09）。`is_safe_gh_rest` が `-X GET -X DELETE` を
+「GET が 1 つ現れた」で確定させない理由と同型。
+
+glob では「そのフラグが 2 度現れない」を表現できないため、boolean フラグで安全性を担保する
+allow は末尾 ` *` なしの exact 形で書く（`Bash(gh skill publish --dry-run)`）。
+引数を渡したい場合は対象ディレクトリへ移ってから引数なしで実行する（`gh skill publish` の
+ディレクトリ引数は省略時 cwd。2026-09 実測）。フラグ付きで引数も渡す必要が出たら、
+glob を広げるのではなく hook 側の構造判定（`is_safe_git_c` 等と同じ形）に倒すこと。
+
 ## ヘッドレス (`claude -p` + `dontAsk`) の permission 実測（2026-07）
 
 無人実行の permission 設計で `--settings` / `--allowedTools` に頼る前に読む:

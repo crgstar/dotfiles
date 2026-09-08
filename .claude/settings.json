@@ -75,6 +75,7 @@
       "Bash(gh project list *)",
       "Bash(gh project view *)",
       "Bash(gh browse *)",
+      "Bash(gh skill publish --dry-run)",
       "mcp__context7__*",
       "WebSearch",
       "WebFetch(domain:github.com)",

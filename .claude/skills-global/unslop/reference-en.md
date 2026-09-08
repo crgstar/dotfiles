@@ -1,8 +1,6 @@
 <!-- 出典: cursor/plugins — pstack/skills/unslop/SKILL.md (Lauren Tan, MIT)
      https://github.com/cursor/plugins/tree/main/pstack
-     英語向けの原典を逐語で取り込んだもの。SKILL.md はこれを日本語に翻案したもの。
-     下の YAML front matter も原典の一部で、このファイル自体はスキル定義ではない
-     (Claude Code が読むのは SKILL.md だけ)。"Must always apply" は原典側の記述。
+     2026-09-02 時点の逐語コピー。SKILL.md はこれを日本語に翻案したもの。
 
      MIT License
 

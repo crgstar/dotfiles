@@ -1,41 +1,51 @@
 ---
 name: baton
-description: 現在の会話を引き継ぎ書に圧縮し、別の Claude セッションが続きを再開できるようにする。`/baton` の明示呼出で起動。
-argument-hint: "[partial <引き継ぐ範囲>] | <次セッションの焦点>"
+description: 現在の会話を引き継ぎ書に圧縮し、新規に立てた Claude セッションへメッセージで送って続きを再開させる。`/baton <新セッションの名前>` の明示呼出で起動。
+argument-hint: "<新セッションの名前> [partial <引き継ぐ範囲>]"
 disable-model-invocation: true
 ---
 
-会話を要約した引き継ぎ書を Write ツールでファイルに書き込む。
+宛先は既存セッションから探さない。cmux のワークスペースごと新規に立て、名前を自分で決めてそこへ送る。引き継ぎ書は `SendMessage` の `message` に全文を載せる。
 
-## 保存先
+## 宛先セッションを立てる
 
-1. HOME は環境冒頭の primary working directory から取り出す (例: primary が `/Users/foo/repo` なら HOME は `/Users/foo`)。
-2. baton dir を決める:
-   - 既定: `<HOME>/.local/state/baton`
-   - フォールバック: `<HOME>/.claude/settings.json` の `permissions.additionalDirectories` に `~/.local/state/baton` が無ければ `<primary working dir>/.local/baton`
-3. ctx は `git rev-parse --show-toplevel 2>/dev/null || pwd` の出力の末尾セグメント。
-4. stamp は `date +%Y%m%d-%H%M%S` の出力。
-5. file_path:
-   - 通常: `<baton_dir>/baton-<ctx>-<stamp>.md`
-   - partial: `<baton_dir>/baton-partial-<ctx>-<stamp>.md`
-6. Write ツールに `file_path` をリテラル絶対パスで渡し、本文を `content` で直接書く。`~` / `$HOME` / コマンド置換は使わない。
+1. 名前を決める。引数に `partial` があればその手前までが名前。引数が無ければ会話の主題から、`ListAgents` に並んだとき他と見分けが付く短い名前を作る。名前から `'` `"` `$` バッククォートは落とす。下記の `--command` の入れ子引用が壊れるため。
+2. `ListAgents` に同名の生存セッションがあれば、末尾に連番を足して一意にする。同名が 2 行あると `SendMessage` の宛先が一意に決まらないため。
+3. `<name>` を決めた名前に、`<cwd>` を `git rev-parse --show-toplevel 2>/dev/null || pwd` の出力に置いて実行する。
+
+```bash
+cmux ping >/dev/null 2>&1 || { echo "cmux に接続できない。宛先を立てられないので中止" >&2; exit 1; }
+out=$(CMUX_QUIET=1 cmux new-workspace --name '<name>' --cwd '<cwd>' --command "claude -n '<name>'" --focus false 2>&1) || {
+  echo "ワークスペースを立てられないので中止: $out" >&2; exit 1
+}
+echo "$out" | grep -oE 'workspace:[0-9]+' || { echo "ref が読めないので中止: $out" >&2; exit 1; }
+```
+
+4. `ListAgents` を呼び、`<name>` が peer に並ぶのを確認してから送る。並ばなければ呼び直す（ツール往復そのものが待ち時間になるので `sleep` は挟まない）。それでも並ばなければ `cmux read-screen --workspace workspace:<n> --lines 25` で画面を見て、その内容と ref をユーザに報告して止まる。信頼ダイアログ等で起動が止まっていることがあり、その解除は画面の持ち主に委ねる。
+5. `partial` の後ろの自由テキストを「引き継ぐ範囲」として読む。名前そのものは「次セッションの焦点」としても読む。
+
+## 送信
+
+`message` の 1 行目は受け手の人間に見える唯一のプレビューなので、`<ctx>: <焦点かひとこと要約>` の形で単体で意味が通る 1 文にする（`ctx` は `<cwd>` の末尾セグメント）。
+
+2 行目に「read-baton スキルのスタンスで扱ってほしい」と書く。メッセージはファイルではないので read-baton が受け手側で自力発動しない。
+
+送信後はユーザに宛先名と cmux のワークスペース ref を報告する。`--focus false` で立てているので画面は移らない。
 
 ## 本文
 
-PRD・plan・ADR・issue・commit・diff など、既に他の成果物に書かれている内容は本文に転写しない。パスや URL で参照する。
+PRD・plan・ADR・issue・commit・diff など、既に他の成果物に書かれている内容は転写しない。パスや URL で参照する。
 
-git repo なら冒頭に branch・HEAD SHA・dirty ファイルの有無を記録する。受け手が「baton 作成後に repo が動いたか」を機械的に検知する基準点になる。
+git repo なら冒頭に branch・HEAD SHA・dirty ファイルの有無を記録する。受け手が「送信後に repo が動いたか」を機械的に検知する基準点になる。
 
 主張には確認手段 (コマンド・パス・行番号) を添える。受け手は主張を一次情報で verify してから使うため、verify が 1 手で済む書き方が引き継ぎの速度を決める。
 
 ユーザと合意済みの決定には「合意済み」と明記し、著者の判断・推測と区別する。受け手が確認すべき箇所を後者だけに絞れる。
 
-本文にファイルパスを記録する際、そのパスが `/tmp/` または `$TMPDIR` 配下（macOS では `/var/folders/` を含む）なら、書き出す前に baton dir へ移動するかユーザーに確認する。移動する場合は `mv <元パス> <baton_dir>/` を実行してからパスを更新する。
+`/tmp` または `$TMPDIR` 配下（macOS では `/var/folders/` を含む）のパスを本文に書くときは、送る前に移動先をユーザに確認する。移動したらパスを更新する。
 
 未検証の進捗・完了状態は断定形で書かない。受け手がそのまま信じると実態との食い違いが生じるため、確認が必要な状態は「未確認」と明記するか確認手段を添える。
 
-セッション内ツール（タスク管理等）の状態は次セッションに引き継がれず消える。登録内容はタスク内容ごと引き継ぎ書に転写し「再登録が必要」と明示する。
+セッション内ツール（タスク管理等）の状態は宛先セッションへ引き継がれない。登録内容はタスク内容ごと本文に転写し「再登録が必要」と明示する。
 
-引数があり先頭トークンが `partial` でないときは、引数を「次セッションの焦点」として扱い、それに合わせてドキュメントを整える。
-
-引数の先頭トークンが `partial` のときは、続く自由テキストを「引き継ぐ範囲」の記述として扱う。範囲外の文脈は書かない（次エージェントが自分のスコープ外に手を出すのを防ぐため）。範囲が曖昧なら書き出す前に確認する。
+「引き継ぐ範囲」が渡されていれば、範囲外の文脈は書かない（受け手が自分のスコープ外に手を出すのを防ぐため）。範囲が曖昧なら送る前に確認する。

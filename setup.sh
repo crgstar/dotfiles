@@ -634,6 +634,13 @@ target_skills() {
               "$HOME/.claude/skills/$review_skill/evals"
   done
 
+  # why: jj の操作規律そのものは第三者製の jujutsu スキル (~/.claude/skills/jujutsu、
+  #      dotfiles 管理外) に委譲しており、本スキルは「PR 差分を change の列に切り直す」
+  #      工程だけを持つ。委譲先が無いマシンでは前半の規律が読めないので、
+  #      jujutsu を入れてから使う。
+  link_file "$DOTFILES_DIR/.claude/skills-global/jj-restack-pr/SKILL.md" \
+            "$HOME/.claude/skills/jj-restack-pr/SKILL.md"
+
   # ----- auq-web skill -----
   # why: auq-web は SKILL.md/references (Claude が読むテキスト) を他スキルと同じく
   #   dotfiles で管理し、server 実体は別リポ (auq-web) に置く分割構成。

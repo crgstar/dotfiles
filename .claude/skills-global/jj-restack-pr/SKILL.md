@@ -7,7 +7,7 @@ description: |
   「PR の差分を層に分けて」「この PR の差分を積み直して」
   「前提から順に読めるように並べ直して」等のリクエストで使う。
   PR 番号や PR URL と、change・積み上げ・切り直しが同時に出てきたら発動する。
-  対象外: bookmark を付けて push したり PR を作る作業、新規 PR の作成 (create-pr の領分)、
+  対象外: push や PR 作成 (create-pr の領分)、
   指摘の投稿 (review-comment)、レビュー対応の修正 (respond-to-pr-review)、
   fork からの PR。
 ---
@@ -15,8 +15,8 @@ description: |
 # jj で PR 差分を review 単位の change に積み直す
 
 jj の操作規律 (preflight・非対話・書き換えの手順) は `jujutsu` スキルに従う。
-本スキルは「PR の差分を change の列に作り直す」工程だけを扱い、**ローカルに change の列ができた
-時点で終わる**。bookmark・push・PR 作成には進まない。
+本スキルは「PR の差分を change の列に作り直す」工程だけを扱い、**列に bookmark を付けた時点で
+終わる**。push・PR 作成には進まない。
 
 元の PR のコミットは一切触らない。分岐点の上に新しい change を積むだけなので、
 やり直すときは作った change を `jj abandon` すれば元の状態に戻る。
@@ -60,6 +60,9 @@ jj abandon -r "\"$FORK\":: & ~::@ & ~::\"$HEAD_OID\" & ~::\"$BASE@origin\""
 **change-id が壊れる操作 (`jj squash` / `jj split` / 差分の作り直し) をしたら、どの change に
 何をしたかを伝える。** 紐付けの張り直しがレビュー側の作業になるため。
 describe・rebase・順序の入れ替えは change-id が残るので連絡は要らない。
+
+**Phase 7 でブランチを付ける前にも伝えて返事を待つ。** detached HEAD 前提で表示を絞っている
+ツールだと、列が画面から消えることがある。
 
 ## 1. 対象を確定する
 
@@ -179,7 +182,7 @@ MODE=<minimal | reading>
 ```
 
 プラン表 (順 / 層 / メッセージ案 / 対象 path / 依存の根拠) を提示し、承認を取ってから Phase 3 へ進む。
-**この承認が Phase 3〜6 全体の唯一のチェックポイント。** 以降は個別確認なしで連続実行する。
+**この承認が Phase 3〜7 全体の唯一のチェックポイント。** 以降は個別確認なしで連続実行する。
 Phase 4 の検証が落ちてプランを直したときは、直した内容で改めて承認を取る。
 **読み順モードではプランを HTML で見せる** (保存先とビューアは `CLAUDE.md` の規約に従う)。
 表が縦に長いと地の文では読み合わせが往復するため。
@@ -310,6 +313,26 @@ X は**直近の祖先**を指す。系列の一番古いもの (雛形そのも
 change を 1 つずつ読むと引っかかるが内容は変えられない箇所 (先取りしたテスト名等) は、
 **本文に「留意:」として残す**。読み手が同じ疑問で止まるのを防ぐため。
 
-検証が通ったら、積み上がった change の列を提示して終了する。この先どうするかはユーザが決める。
-レビューが並走しているなら、**bookmark を付けると detached HEAD 前提の表示から外れ得ることも
-伝える**。この先の push で最初に踏むため。
+## 7. 列に名前を付けて git 側から見えるようにする
+
+detached HEAD のままだと、`git status` も Claude Code のセッション開始時の表示も
+「現在のブランチ = HEAD」としか言わない。**別のセッションがこの列を名前で指せず取り違える。**
+元の PR のブランチ名に `-splitted` を付けた名前にする。
+
+**このスキルの中で jj を動かす最後の操作にする。** git HEAD を付け替えたあとに jj が `@-` を
+動かすと、jj が HEAD を detached に戻す (実測)。
+
+```bash
+HEAD_REF=<Phase 1 の実値>
+jj bookmark set "$HEAD_REF-splitted" -r @-   # 無ければ作り、あれば動かす
+git checkout "$HEAD_REF-splitted"            # git HEAD をブランチに乗せる
+git -C . status -sb | head -1                # "## <ブランチ名>" が出れば成功
+```
+
+**この `git checkout` は `jujutsu` スキルの「jj repo で raw git を使わない」の唯一の例外。**
+git HEAD をブランチに付け替える操作が jj のコマンドに無いため。
+bookmark は remote を追跡しないので、この時点では push されない。
+
+完了報告では、**ブランチ名と、この先 jj で `@` を動かすと HEAD が detached に戻ることを伝える。**
+
+名前を付けたら、積み上がった change の列を提示して終了する。push するかはユーザが決める。

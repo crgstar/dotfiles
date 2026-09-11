@@ -641,6 +641,14 @@ target_skills() {
   link_file "$DOTFILES_DIR/.claude/skills-global/jj-restack-pr/SKILL.md" \
             "$HOME/.claude/skills/jj-restack-pr/SKILL.md"
 
+  # why: PR レビューを sentinel → review-verdict → jj-restack-pr → annotate →
+  #      review-comment の 1 本に繋ぐ流れ。繋ぐ側だけ dotfiles 外に残ると、
+  #      各単体スキルは配られているのに流れの順序と取り決めが読めなくなる。
+  #      annotate (mirugit リポジトリ側) は dotfiles 管理外なので、
+  #      mirugit を入れてから使う。
+  link_file "$DOTFILES_DIR/.claude/skills-global/annotate-review-flow/SKILL.md" \
+            "$HOME/.claude/skills/annotate-review-flow/SKILL.md"
+
   # ----- auq-web skill -----
   # why: auq-web は SKILL.md/references (Claude が読むテキスト) を他スキルと同じく
   #   dotfiles で管理し、server 実体は別リポ (auq-web) に置く分割構成。

@@ -222,7 +222,10 @@ _is_word_bounded_noop_redirect() {
 has_unsafe_metachar() {
   local s="$1"
   local i=0 len=${#s} ch
-  local in_single=0 in_double=0 bs_run=0
+  local in_single=0 in_double=0 bs_run=0 _brace_rest _brace_body
+  # リテラル扱いで通したブレース群が現在の語に出たか / その後にクォート外カンマが出たか。
+  # 語が変わる (クォート外の空白) たびにリセットする。
+  local brace_word=0 brace_comma=0
   while [ "$i" -lt "$len" ]; do
     ch="${s:$i:1}"
     # why リダイレクト開始文字だけを先に見る: この関数は 1 文字ずつ全体を走査する
@@ -272,18 +275,50 @@ has_unsafe_metachar() {
           fi
           ;;
         '{')
-          # why リテラル `{}` 以外のクォート外ブレースを落とす: bash のブレース展開は
-          # `{a,b}` / `{1..3}` の形で 1 語を複数語へ増やすので、トークンの先頭を `{` に
-          # するだけでフラグを bare トークンに偽装できる。`git grep {-O,-O}'echo x' pat`
-          # は tokenize_quoted には `{-O,-O}echo x` という bare トークン 1 個に見えるが、
+          # why 展開が起きるブレース群だけ落とす: bash のブレース展開は `{a,b}` /
+          # `{1..3}` の形で 1 語を複数語へ増やすので、トークンの先頭を `{` にするだけで
+          # フラグを bare トークンに偽装できる。`git grep {-O,-O}'echo x' pat` は
+          # tokenize_quoted には `{-O,-O}echo x` という bare トークン 1 個に見えるが、
           # 実 bash では `-Oecho x` へ展開されて pager が起動する (echo の実行を実測)。
           # 同じ手で `gh api {-X,-X}DELETE ...` / `git -C {p,p} ...` のフラグ検査も
-          # すり抜ける。展開が起きない `{}` だけは通す (`xargs -I{} cat` /
-          # `find -exec ... {}` が静的 allow に載っているため)。
-          [ "${s:$((i+1)):1}" = '}' ] || return 0
-          i=$((i+1))
+          # すり抜ける。
+          #
+          # 逆に中身が `[A-Za-z0-9_-]` だけのブレース群は展開されずリテラルのまま残る
+          # (`,` も `..` も無いため。bash 3.2 / bash 5 / zsh で実測)。ここを落とすと
+          # `gh api repos/{owner}/{repo}/...` が丸ごと ask になる — `{owner}` / `{repo}` /
+          # `{branch}` は gh api の公式プレースホルダ (`gh api --help` に明記) で、
+          # PR レビュー系スキルが既定でこの形を使う。`git rev-parse HEAD^{tree}` も同型。
+          # 閉じ `}` が無い形は展開範囲が読めないので落とす。
+          #
+          # ただし「最初の `}` で群が閉じる」とは限らない。bash の brace_gobbler は
+          # level 0 のクォート外カンマを 1 つ見るまで `}` を閉じ括弧として扱わないので、
+          # 同じ語の後方にカンマ + `}` があると最初の `}` を跨いで展開される
+          # (`git grep {-O}x,-O}'echo x' pat` → `-Oecho x` に展開されて pager が起動。
+          # bash 3.2 / bash 5 で実測)。中身が alnum だけでも展開は起きるため、
+          # ここでは「語の残りにクォート外カンマ + その後の `}` が無い」ことまで要る。
+          # 判定は下の `,` / `}` / 空白の分岐に持ち越す (1 パスのまま済ませるため)。
+          _brace_rest="${s:$((i+1))}"
+          _brace_body="${_brace_rest%%\}*}"
+          [ "$_brace_body" = "$_brace_rest" ] && return 0
+          [ -z "${_brace_body//[A-Za-z0-9_-]/}" ] || return 0
+          brace_word=1
+          i=$((i+1+${#_brace_body}))
+          ;;
+        ',')
+          # 語内にリテラル扱いしたブレース群があるときだけ意味を持つ。クォート内・
+          # エスケープ済みのカンマは bash も数えないので、ここには届かない。
+          [ "$brace_word" = 1 ] && brace_comma=1
+          ;;
+        '}')
+          # カンマの後の `}` が群を閉じる = 展開が起きる。
+          [ "$brace_comma" = 1 ] && return 0
           ;;
         '$'|'`'|'&'|'('|')'|'<'|'>') return 0 ;;
+        ' '|$'\t')
+          # クォート外の空白は語の境界。bash のブレース展開は語をまたがない。
+          brace_word=0
+          brace_comma=0
+          ;;
         *) [ "$ch" = $'\n' ] && return 0 ;;
       esac
     fi
@@ -1055,15 +1090,31 @@ b'"
 b'"
 
   # クォート外のブレース展開はトークン先頭を `{` にしてフラグを bare トークンへ偽装できる。
-  # `{}` (展開されないリテラル) だけは xargs -I{} / find -exec 用に通す。
+  # 中身が `[A-Za-z0-9_-]` だけで、同じ語の後方にクォート外カンマ + `}` が続かない
+  # ブレース群 (`{}` / `{owner}` / `{tree}`) だけ展開されないので通す。gh api の
+  # プレースホルダと git の rev 構文がこの形。
   assert_unsafe 'ブレース展開で git grep -O を隠す' "git grep {-O,-O}'echo pwned' needle"
   assert_unsafe 'ブレース展開で gh api のメソッドを隠す' 'gh api {-X,-X}DELETE repos/foo/bar/issues/1'
   assert_unsafe 'ブレース展開で git -C のパス位置を隠す' 'git -C {/tmp,/tmp} status'
   assert_unsafe 'ブレース連番展開' 'gh api repos/foo/bar/issues/{1..3}'
   assert_unsafe '閉じないブレース' 'gh api repos/foo/bar/issues/{1'
+  assert_unsafe 'ネストしたブレース' 'gh api repos/{owner/{repo}/pulls'
+  assert_unsafe 'ブレース内にスラッシュ (パス偽装の余地)' 'git -C {/tmp} status'
+  # bash は level 0 のカンマを見るまで `}` で群を閉じない。中身が alnum だけの
+  # 群に見えても、同じ語の後方にカンマ + `}` があれば最初の `}` を跨いで展開される。
+  assert_unsafe '最初の } を跨ぐ展開で git grep -O を隠す' "git grep {-O}x,-O}'echo pwned' needle"
+  assert_unsafe '最初の } を跨ぐ展開で gh api のメソッドを隠す' 'gh api {-X}x,-X}DELETE repos/foo/bar/issues/1'
+  assert_unsafe '最初の } を跨ぐ展開で git -C のパス位置を隠す' 'git -C {tmp}x,tmp} status'
+  assert_unsafe 'リテラル群の後にカンマ + }' 'gh api repos/{owner},x}/pulls'
+  assert_safe 'カンマが別の語 (展開は語をまたがない)' 'gh api repos/{owner}/{repo}/pulls -q .,x}'
+  assert_safe 'カンマの後に } が無い (クエリ文字列)' 'gh api repos/{owner}/{repo}/issues?labels=bug,enhancement'
+  assert_safe 'エスケープされたカンマは数えない' 'gh api repos/{owner}/{repo}/pulls/1\,x}'
   assert_safe 'xargs -I{} (展開されないリテラル)' 'gh api repos/foo/bar/pulls/1 | xargs -I{} cat'
   assert_safe 'xargs -I {} (展開されないリテラル)' 'gh api repos/foo/bar/pulls/1 | xargs -I {} cat'
   assert_safe 'クォート内のブレース (jq)' "gh api repos/foo/bar/pulls/1 | jq '{a: .b}'"
+  assert_safe 'gh api の {owner}/{repo} プレースホルダ' 'gh api repos/{owner}/{repo}/pulls/1/comments --paginate'
+  assert_safe '{branch} プレースホルダ' 'gh api repos/{owner}/{repo}/branches/{branch}'
+  assert_safe 'git の rev 構文 HEAD^{tree}' 'git -C /tmp rev-parse HEAD^{tree}'
 
   # gh api graphql: mutation を含まない参照クエリは -f query=... 付きでも allow
   assert_safe 'graphql introspection' "gh api graphql -f query='query { __type(name: \"ProjectV2SingleSelectField\") { fields { name type { name kind ofType { name } } } } }'"

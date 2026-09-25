@@ -25,5 +25,5 @@
 | 動いて見える | テストが通る |
 | 滑らかに進む | 規律を守る |
 
-Fable モデル (claude-fable-5) をメインモデルとして使うセッションでのみ、以下を適用する。それ以外のモデル (Sonnet / Opus / Haiku 等) では無視する。
+Fable 系モデル (claude-fable-5 / claude-fable-5-1 等) をメインモデルとして使うセッションでのみ、以下を適用する。それ以外のモデル (Sonnet / Opus / Haiku 等) では無視する。
 @FABLE.md

@@ -58,7 +58,57 @@
       "Bash(gws sheets spreadsheets values batchGet *)",
       "Bash(gws sheets spreadsheets values batchGetByDataFilter *)",
       "Bash(gws sheets spreadsheets developerMetadata get *)",
-      "Bash(gws sheets spreadsheets developerMetadata search *)"
+      "Bash(gws sheets spreadsheets developerMetadata search *)",
+      "mcp__backlog__count_issues",
+      "mcp__backlog__count_notifications",
+      "mcp__backlog__get_categories",
+      "mcp__backlog__get_custom_fields",
+      "mcp__backlog__get_document",
+      "mcp__backlog__get_document_tree",
+      "mcp__backlog__get_documents",
+      "mcp__backlog__get_git_repositories",
+      "mcp__backlog__get_git_repository",
+      "mcp__backlog__get_issue",
+      "mcp__backlog__get_issue_attachment",
+      "mcp__backlog__get_issue_comments",
+      "mcp__backlog__get_issue_types",
+      "mcp__backlog__get_issues",
+      "mcp__backlog__get_myself",
+      "mcp__backlog__get_notifications",
+      "mcp__backlog__get_priorities",
+      "mcp__backlog__get_project",
+      "mcp__backlog__get_project_list",
+      "mcp__backlog__get_project_users",
+      "mcp__backlog__get_pull_request",
+      "mcp__backlog__get_pull_request_comments",
+      "mcp__backlog__get_pull_requests",
+      "mcp__backlog__get_pull_requests_count",
+      "mcp__backlog__get_related_issues",
+      "mcp__backlog__get_resolutions",
+      "mcp__backlog__get_space",
+      "mcp__backlog__get_space_activities",
+      "mcp__backlog__get_user_recent_updates",
+      "mcp__backlog__get_user_stars_count",
+      "mcp__backlog__get_users",
+      "mcp__backlog__get_version_milestone_list",
+      "mcp__backlog__get_watching_list_count",
+      "mcp__backlog__get_watching_list_items",
+      "mcp__backlog__get_wiki",
+      "mcp__backlog__get_wiki_pages",
+      "mcp__backlog__get_wikis_count",
+      "mcp__slack__slack_get_reactions",
+      "mcp__slack__slack_list_channel_members",
+      "mcp__slack__slack_list_user_channels",
+      "mcp__slack__slack_read_canvas",
+      "mcp__slack__slack_read_channel",
+      "mcp__slack__slack_read_file",
+      "mcp__slack__slack_read_list",
+      "mcp__slack__slack_read_thread",
+      "mcp__slack__slack_read_user_profile",
+      "mcp__slack__slack_search_channels",
+      "mcp__slack__slack_search_emojis",
+      "mcp__slack__slack_search_public",
+      "mcp__slack__slack_search_users"
     ],
     "deny": [
       "Bash(cup delete *)",
@@ -120,7 +170,13 @@
       "Bash(cup filter *)",
       "Bash(cup favorite *)",
       "Bash(cup profile *)",
-      "Bash(cup config *)"
+      "Bash(cup config *)",
+      "mcp__backlog__delete_issue",
+      "mcp__backlog__delete_version",
+      "mcp__backlog__delete_watching",
+      "mcp__backlog__remove_related_issue",
+      "mcp__slack__slack_send_message",
+      "mcp__slack__slack_schedule_message"
     ]
   },
   "enabledPlugins": {},
@@ -129,6 +185,18 @@
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/",
       "headersHelper": "~/.claude/mcp/github-auth-headers.sh"
+    },
+    "slack": {
+      "type": "http",
+      "url": "https://mcp.slack.com/mcp",
+      "oauth": {
+        "clientId": "1601185624273.8899143856786",
+        "callbackPort": 3118
+      }
+    },
+    "backlog": {
+      "command": "sh",
+      "args": ["-c", "exec ~/.claude/mcp/backlog-mcp.sh"]
     }
   }
 }

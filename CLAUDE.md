@@ -22,8 +22,9 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
 - `.claude/settings.local/common.json` — 全ローカル env 共通の追加層
 - `.claude/settings.local/<env>.json` — 環境別の追加設定
 - `.claude/settings.local.json` — このリポジトリ固有のプロジェクト設定
-- `~/projects/claude-spinner-verbs-japanese/spinner-verbs.json` — dotfiles 外の別リポにある spinner 語彙データ。存在するときだけ `spinnerVerbs` キーのみを抽出して common の後ろに挟む（無ければ黙って省略）
-- setup.sh が jq で `base → common → (spinner) → <env>` の順にマージして `.claude/settings.merged.json` に書き出し、`~/.claude/settings.json` にシンボリックリンク
+- `~/projects/claude-spinner-verbs-japanese/spinner-verbs.json` — dotfiles 外の別リポにある spinner 語彙データ。存在するときだけ `spinnerVerbs` キーのみを抽出して mods の後ろ（mods が無ければ common の後ろ）に挟む（無ければ黙って省略）
+- `~/.claude/mods/` — dotfiles 外に置く自作 mod の marketplace。存在するときだけ、setup.sh が `$HOME` から組み立てた `extraKnownMarketplaces`（directory ソースは絶対パスを要求し、公開リポにホームのパスを書けないため）と、`marketplace.json` に載る全 plugin を有効にする `enabledPlugins` を common の後ろに挟む
+- setup.sh が jq で `base → common → (mods) → (spinner) → <env>` の順にマージして `.claude/settings.merged.json` に書き出し、`~/.claude/settings.json` にシンボリックリンク
 - 配列フィールド（permissions.allow 等）はマージ時に結合される（上書きではない）
 - IMPORTANT: `permissions.ask` など「対話セッション専用」の設定は base ではなく **common.json** に置く。base はクラウド routine がクローン先で project 設定として直読みするため、base に ask を置くと routine が `git push` 等で承認待ちに止まる。routine は setup.sh を通らず base だけ読むので、common 経由なら routine は ask 無し（自律実行）・ローカルは ask 維持を両立できる（Claude Code は配列スコープを union するので上位から ask を消せない＝base から除くのが唯一の手段）
 
@@ -43,7 +44,7 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
 
 - `.claude/settings.local/<env>.json` の `mcpServers` を、setup.sh が jq で `~/.claude.json` の `mcpServers` に直接マージする（他の3つと異なりシンボリックリンクではなく `~/.claude.json` そのものを上書き。conflict 確認ダイアログもなし）
 - マージはサーバ単位の**置換**（jq の `+`）。dotfiles 側のエントリが唯一の正で、そこから消したフィールドは `~/.claude.json` からも消える。再帰マージ（`*`）だとキーを足せても消せず、削除したはずの設定が残り続けるため
-- `.claude/mcp/` 配下のスクリプトは `~/.claude/mcp/` にリンクされる。トークン等を環境変数ではなく接続時に生成する `headersHelper` の実体を置く場所（環境変数だと Claude Code が起動する全子プロセスへ配られ、`env` の出力からモデルのコンテキストへ流入しうる）
+- `.claude/mcp/` 配下のスクリプトは `~/.claude/mcp/` にリンクされる。トークン等を環境変数ではなく接続時に生成する `headersHelper` や、秘密を Keychain から読んで stdio サーバーを起動するラッパー（`backlog-mcp.sh`）の実体を置く場所（環境変数だと Claude Code が起動する全子プロセスへ配られ、`env` の出力からモデルのコンテキストへ流入しうる）
 
 - IMPORTANT: ルールや設定を追加・削除した場合は毎回 `./setup.sh <env>` を実行してマージ結果を更新する
   - 2回目以降は `basename "$(readlink ~/.zshrc.local)" .zsh` で現在の env を判定できる

@@ -9,17 +9,19 @@ disable-model-invocation: true
 
 ## 宛先セッションを立てる
 
-1. 名前を決める。引数に `partial` があればその手前までが名前。引数が無ければ会話の主題から、`ListAgents` に並んだとき他と見分けが付く短い名前を作る。名前から `'` `"` `$` バッククォートは落とす。下記の `--command` の入れ子引用が壊れるため。
+1. 名前を決める。引数に `partial` があればその手前までが名前。引数が無ければ会話の主題から、`ListAgents` に並んだとき他と見分けが付く短い名前を作る。名前から `'` は落とす。下記の `'<name>'` の引用が壊れるため。
 2. `ListAgents` に同名の生存セッションがあれば、末尾に連番を足して一意にする。同名が 2 行あると `SendMessage` の宛先が一意に決まらないため。
 3. `<name>` を決めた名前に、`<cwd>` を `git rev-parse --show-toplevel 2>/dev/null || pwd` の出力に置いて実行する。
 
 ```bash
 cmux ping >/dev/null 2>&1 || { echo "cmux に接続できない。宛先を立てられないので中止" >&2; exit 1; }
-out=$(CMUX_QUIET=1 cmux new-workspace --name '<name>' --cwd '<cwd>' --command "claude -n '<name>'" --focus false 2>&1) || {
+out=$(CMUX_QUIET=1 cmux new-workspace --name '<name>' --cwd '<cwd>' --env 'BATON_NAME=<name>' --command 'claude -n "$BATON_NAME"' --focus false 2>&1) || {
   echo "ワークスペースを立てられないので中止: $out" >&2; exit 1
 }
 echo "$out" | grep -oE 'workspace:[0-9]+' || { echo "ref が読めないので中止: $out" >&2; exit 1; }
 ```
+
+名前を `--command` に直接埋め込まず `--env` 経由で渡すのは、cmux が `--command` の非 ASCII 文字を二重に UTF-8 化して端末へ打ち込み、日本語のセッション名が化けるため。
 
 4. `ListAgents` を呼び、`<name>` が peer に並ぶのを確認してから送る。並ばなければ呼び直す（ツール往復そのものが待ち時間になるので `sleep` は挟まない）。それでも並ばなければ `cmux read-screen --workspace workspace:<n> --lines 25` で画面を見て、その内容と ref をユーザに報告して止まる。信頼ダイアログ等で起動が止まっていることがあり、その解除は画面の持ち主に委ねる。
 5. `partial` の後ろの自由テキストを「引き継ぐ範囲」として読む。名前そのものは「次セッションの焦点」としても読む。

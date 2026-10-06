@@ -741,6 +741,8 @@ target_hooks() {
             "$HOME/.claude/hooks/memory-guide-gate.sh"
   link_file "$DOTFILES_DIR/.claude/hooks/cd-outside-workspace-gate.sh" \
             "$HOME/.claude/hooks/cd-outside-workspace-gate.sh"
+  link_file "$DOTFILES_DIR/.claude/hooks/rm-to-trash.sh" \
+            "$HOME/.claude/hooks/rm-to-trash.sh"
 }
 
 target_statusline() {

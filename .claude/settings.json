@@ -35,6 +35,7 @@
       "Bash(tail *)",
       "Bash(file *)",
       "Bash(stat *)",
+      "Bash(trash *)",
       "Bash(which *)",
       "Bash(type *)",
       "Bash(git status *)",
@@ -239,6 +240,10 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/cd-outside-workspace-gate.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/rm-to-trash.sh"
           }
         ]
       },

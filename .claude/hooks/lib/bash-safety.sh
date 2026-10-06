@@ -285,3 +285,57 @@ split_with_separator() {
   pending="other"
   _emit_rec
 }
+
+# ---- scratchpad 配下限定の rm 判定 (scratchpad-rm-allow.sh / rm-to-trash.sh 共有) ----
+
+# rm コマンドに許す文字集合(白名簿)。ここに無い文字が 1 つでもあれば判定せず ask に委ねる。
+# why 白名簿: `&& $() ` ` ; | < > ~ ' "` 改行 をすべてこの 1 本で落とせる。
+# クォートも展開も複合コマンドも許さないので、後段は IFS 分割だけで実 argv と一致し、
+# segment-allow.sh のような tokenize/split の再実装が不要になる。
+SCRATCHPAD_RM_SAFE_CHARS='^[A-Za-z0-9_./*?,+=:@ -]+$'
+
+# 純粋判定: cmd が「$session_id の scratchpad 配下限定の rm」なら 0、それ以外は 1。
+# $3 (省略可) に uid を渡せる (self-test 用。省略時は実行ユーザの uid)。
+rm_confined_to_scratchpad() {
+  local cmd="$1" session_id="$2" uid="${3-$(id -u)}"
+
+  # session_id はそのまま正規表現に埋めるので、メタ文字が混じらない形だけ受ける
+  [[ "$session_id" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+  [[ "$uid" =~ ^[0-9]+$ ]] || return 1
+  [[ "$cmd" =~ $SCRATCHPAD_RM_SAFE_CHARS ]] || return 1
+
+  local -a toks=()
+  read -ra toks <<< "$cmd"
+  [ "${#toks[@]}" -ge 2 ] || return 1
+  # `command rm` / `/bin/rm` / sudo 経由は意図が読めないので素の rm だけ
+  [ "${toks[0]}" = 'rm' ] || return 1
+
+  # 末尾を `/[^/].*` にして scratchpad ルート自体の削除を除外する
+  # (ルートが消えるとそのセッションの以降の一時ファイル書き込みが軒並み失敗する)
+  local re="^/private/tmp/claude-${uid}/[^/]+/${session_id}/scratchpad/[^/].*"
+  local operands=0 end_of_flags=0 t
+  for t in "${toks[@]:1}"; do
+    if [ "$end_of_flags" = 0 ]; then
+      case "$t" in
+        --) end_of_flags=1; continue ;;
+        # 連結短縮フラグのみ許可。BSD rm に long option は無く、未知フラグは
+        # 意図を読めないので ask に倒す
+        -*) [[ "$t" =~ ^-[rRfvdi]+$ ]] || return 1; continue ;;
+      esac
+    fi
+    # ドットで始まるパス成分を一律拒否する。
+    # why 「.. だけ」では足りない: 白名簿は `.` `?` `*` を通すので、リテラルの `..` が
+    # 無くても `scratchpad/.?/.?/x` のようなパターンがシェルの展開時に `../../x` になり、
+    # prefix 照合をすり抜けて scratchpad の外を消せる (`.` 始まりの成分は `?`/`*` では
+    # マッチしないので、`/.` を封じれば展開後も prefix の内側に閉じる)。
+    # bash 5.2+ の globskipdots や zsh は `.`/`..` を展開対象から外すが、
+    # /bin/bash 3.2 (macOS 同梱) では実際に展開されるためシェル任せにしない。
+    case "$t" in
+      .*|*/.*) return 1 ;;
+    esac
+    [[ "$t" =~ $re ]] || return 1
+    operands=$((operands + 1))
+  done
+
+  [ "$operands" -ge 1 ]
+}

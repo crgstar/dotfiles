@@ -222,6 +222,26 @@ PermissionRequest hook はヘッドレスで発火しない。`reflect` は
 
 self-test: `bash .claude/hooks/scratchpad-rm-allow.sh --self-test`
 
+判定本体 `rm_confined_to_scratchpad` は `lib/bash-safety.sh` にあり、下記 `rm-to-trash.sh` と共有する。片方だけ範囲を変えると「trash 強制側は素通ししたのに allow 側は ask」(またはその逆) になるため、ここ 1 箇所で直す。
+
+## rm-to-trash.sh の拒否条件
+
+`rm` を PreToolUse で deny し、理由文で「`trash <同じ引数>` で出し直せ」とモデルに指示する hook。`/usr/bin/trash` (macOS 15+) はゴミ箱へ移すだけなので、誤削除をユーザが戻せる。ゴミ箱はユーザが手動で空にする運用。
+
+**コマンドを書き換えず deny する。** `&&` やクォート混じりの書き換えは壊れやすく、実際に何が実行されたかが transcript から読めなくなるため。
+
+- 拒否: 区切り (`&&` `||` `;` `|` 改行) で分けた各セグメントのうち、コマンド名が `rm` のもの。`sudo` / `command` / `env` / `nice` / `timeout` / `VAR=x` / `(` / `{` の前置き、制御構文の予約語 (`do` / `then` / `else` 等。`for ...; do rm $f; done` は `;` で割ると `do rm $f` になるため)、`/bin/rm`・`\rm` も剥がして見る。前置きコマンドの値を取るフラグ (`sudo -u <user>` / `nice -n <n>` 等) はコマンド別に持つ — 一律に「フラグの次は値」とすると値を取らない `sudo -n rm` の rm を読み飛ばす。`xargs` はオプションを読み飛ばした実行ユーティリティ、`find` は `-exec` / `-execdir` / `-ok` / `-okdir` の直後を見る
+- 素通し: 自セッション scratchpad 配下だけを消す単独の `rm` (上記と同じ判定)。heredoc の本文行 (実行されない文字列。丸ごと対象外にすると heredoc の後ろの本物の rm を見落とすので本文だけ落とす)。`find -delete` は trash で言い換えられないので `escalate-unsafe-bash.sh` の ask に任せる
+- 全 Bash 呼び出しで起動するので、クォートを剥がした文字列に語としての `rm` が無ければトークン化せずに素通しする (1 文字ずつ回すトークナイザは heredoc で大きなファイルを書くコマンドで数秒かかる)
+- 理由文の `find` の言い換えは `-exec trash` ではなく `-print0 | xargs -0 trash`。`find -exec` は `escalate-unsafe-bash.sh` が一律 ask にするので、案内どおり直しても確認に落ちる。案内した形がこの hook 自身に止められないことは self-test で固定してある
+- 限界: `bash -c '...'`・スクリプトファイル・`eval`・`$(...)` の中の rm は拾えない。取りこぼしは `settings.local/common.json` の ask (`Bash(rm *)`) が人間の確認で受ける。**ask を外すと取りこぼしが無確認で走るので残すこと**
+
+PreToolUse は PermissionRequest より先に発火するので、scratchpad の例外はこの hook 側にも要る (無いと deny が先に効き、`scratchpad-rm-allow.sh` まで届かない)。
+
+`trash` は `Bash(trash *)` で静的 allow に載せている (ゴミ箱から戻せるため)。`trash` の受け付けるフラグは `-v` / `-s` だけで、`-r` / `-f` を渡すと失敗するので、理由文で付けないよう指示している。
+
+self-test: `bash .claude/hooks/rm-to-trash.sh --self-test`
+
 ## pr-comment-signature.sh の格上げ条件
 
 `respond-to-pr-review` / `review-comment` は返信・指摘の末尾に「空行 + Claude Code の署名」を必須としているが、スキルを経由せず `gh api` を直接叩くと規定を踏まずに投稿できてしまう。PreToolUse hook (`.claude/hooks/pr-comment-signature.sh`) が、コメント本文を送る `gh api` 呼び出しで署名を確認できないときだけ ask に格上げする。判定できないケース（本文ファイルを解決できない・入力 JSON を解釈できない）は pass ではなく ask に倒す。

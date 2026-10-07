@@ -16,7 +16,7 @@ TARGETS=(
   "claude-md:CLAUDE.md を base+env でマージし、FABLE.md と併せてリンク"
   "skills:スキル・サブエージェント定義のリンク (第三者リポの clone を含む)"
   "hooks:permission 系 hook スクリプトのリンク"
-  "statusline:statusLine ラッパと RunCat Neo 用スナップショット生成のリンク"
+  "statusline:statusLine ラッパ・RunCat Neo 用スナップショット生成・キャッシュ寿命ゲージのリンク"
   "reflect:reflect 無人実行 (SessionEnd hook + launchd 夜間ドライバ)"
   "cmux-pill:cmux のサイドバーピル塗り替え常駐 (launchd)"
   "prefixes:segment-allow.prefixes を permissions.allow から再生成 (claude-settings の後)"
@@ -750,6 +750,8 @@ target_statusline() {
     "$HOME/.claude/statusline.sh"
   link_file "$DOTFILES_DIR/.claude/statusline/runcat-statusline.py" \
     "$HOME/.claude/runcat-statusline.py"
+  link_file "$DOTFILES_DIR/.claude/statusline/cache-gauge.sh" \
+    "$HOME/.claude/cache-gauge.sh"
 }
 
 target_reflect() {

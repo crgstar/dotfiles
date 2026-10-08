@@ -550,9 +550,10 @@ target_skills() {
             "$HOME/.claude/skills/docbase-mermaid/SKILL.md"
   link_file "$DOTFILES_DIR/.claude/skills-global/reflect/SKILL.md" \
             "$HOME/.claude/skills/reflect/SKILL.md"
-  # why: スキルが委譲する専用サブエージェント。生ログ隔離 (retro-extractor)・漏洩監査
+  # why: 別コンテキストで動かす専用サブエージェント。生ログ隔離 (retro-extractor)・漏洩監査
   #      (sanitize-auditor)・HTML ドキュメントレビュー (doc-reviewer)・SKILL.md 書き味レビュー
-  #      (skill-md-reviewer) を tools 制限付きで担う。user スコープ (~/.claude/agents) に置く。
+  #      (skill-md-reviewer)・判断を仰ぐ資料の作り直し (proposal-doc-fixer) を tools 制限付きで担う。
+  #      user スコープ (~/.claude/agents) に置く。
   link_file "$DOTFILES_DIR/.claude/agents/retro-extractor.md" \
             "$HOME/.claude/agents/retro-extractor.md"
   link_file "$DOTFILES_DIR/.claude/agents/sanitize-auditor.md" \
@@ -561,6 +562,8 @@ target_skills() {
             "$HOME/.claude/agents/doc-reviewer.md"
   link_file "$DOTFILES_DIR/.claude/agents/skill-md-reviewer.md" \
             "$HOME/.claude/agents/skill-md-reviewer.md"
+  link_file "$DOTFILES_DIR/.claude/agents/proposal-doc-fixer.md" \
+            "$HOME/.claude/agents/proposal-doc-fixer.md"
   link_file "$DOTFILES_DIR/.claude/skills-global/baton/SKILL.md" \
             "$HOME/.claude/skills/baton/SKILL.md"
   link_file "$DOTFILES_DIR/.claude/skills-global/read-baton/SKILL.md" \

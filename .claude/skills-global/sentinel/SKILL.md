@@ -32,7 +32,7 @@ description: >
 
 **type 使い分けの why**: 1〜3 は Skill を呼ぶため Skill ツールが使える general-purpose が必須。4 は named agent（tools 制限・model 固定済み）で Skill 呼び出し不要。
 
-**1〜3 は `model: sonnet` を明示して起動する**（Fable セッションでメインモデルを継承しトークンを浪費しないため。4 は model 固定済みで不要）。
+**1〜3 は `model: opus` を明示して起動する**（sonnet は大きな差分を流し読みし、スキルが求める網羅（命名・軽微な不整合）を黙って落とすため。4 は model 固定済みで不要）。
 
 各エージェントへの追加指示:
 

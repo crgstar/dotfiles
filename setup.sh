@@ -11,7 +11,7 @@ TARGETS=(
   "ghostty:Ghostty config (base + env をマージして ~/.config/ghostty/config へ)"
   "bin:bin/ 配下と reflect-extract を ~/.local/bin へ"
   "git:.gitignore_global を ~ へ"
-  "shell:.zshrc / zshrc.local/<env>.zsh のリンクと fzf-tab の clone"
+  "shell:.zshrc / zshrc.local/<env>.zsh / .bashrc / .bash_profile / bashrc.local/<env>.bash のリンクと fzf-tab の clone"
   "claude-settings:settings.json を base+common+env でマージして ~/.claude/settings.json へ"
   "claude-md:CLAUDE.md を base+env でマージし、FABLE.md と併せてリンク"
   "skills:スキル・サブエージェント定義のリンク (第三者リポの clone を含む)"
@@ -406,6 +406,16 @@ target_shell() {
   if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/zshrc.local/$HOST_ENV.zsh" ]; then
     link_file "$DOTFILES_DIR/zshrc.local/$HOST_ENV.zsh" \
               "$HOME/.zshrc.local"
+  fi
+
+  link_file "$DOTFILES_DIR/.bashrc" \
+            "$HOME/.bashrc"
+  link_file "$DOTFILES_DIR/.bash_profile" \
+            "$HOME/.bash_profile"
+
+  if [ -n "$HOST_ENV" ] && [ -f "$DOTFILES_DIR/bashrc.local/$HOST_ENV.bash" ]; then
+    link_file "$DOTFILES_DIR/bashrc.local/$HOST_ENV.bash" \
+              "$HOME/.bashrc.local"
   fi
 
   # why: .zshrc が ~/projects/fzf-tab を source するので、未クローンなら shallow clone する

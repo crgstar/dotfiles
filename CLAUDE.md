@@ -56,6 +56,7 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
 - `zshrc.local/<env>.zsh` — 環境別の追加設定
 - `~/.zshrc.local` は `zshrc.local/<env>.zsh` へのシンボリックリンク。`./setup.sh <env>` で張られ、現在の env 判定にも使う（`readlink ~/.zshrc.local`）
 - `.zshrc` の末尾で `~/.zshrc.local` を source する構成
+- bash 用に `.bashrc` / `bashrc.local/<env>.bash`（`~/.bashrc.local` へリンク）が同じ構成で並び、`.bash_profile` は `.bashrc` を読むだけ。zsh 側の設定を変えたら bash 側も揃える（共有ファイルは無く、別々に書いている）
 
 ## ファイル追加時の規約
 

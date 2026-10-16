@@ -445,9 +445,12 @@ target_claude_settings() {
         && merge_inputs+=("$DOTFILES_DIR/.claude/settings.local/common.json")
       # why: mod の marketplace は directory ソースで絶対パスを要求するが、公開リポに
       #      ホームのパスを書けないので、実在するときだけ $HOME から組み立てて差し込む
-      local mods_dir="$HOME/.claude/mods"
-      local mods_tmp="" mods_note=""
-      if [ -f "$mods_dir/.claude-plugin/marketplace.json" ]; then
+      # why: 公開と非公開で別リポに分けている。1 つの marketplace の中で公開範囲を
+      #      エントリごとに分ける手段が Claude Code に無いため
+      local mods_dirs=("$HOME/projects/claude-plugins" "$HOME/projects/claude-plugins-private")
+      local mods_tmps=() mods_note="" mods_dir mods_tmp
+      for mods_dir in "${mods_dirs[@]}"; do
+        [ -f "$mods_dir/.claude-plugin/marketplace.json" ] || continue
         mods_tmp="$(mktemp "${TMPDIR:-/tmp/}crgstar-mods-XXXXXX")"
         # why: marketplace 名と plugin 名は marketplace.json から読む。ここに写すと、
         #      dotfiles 外で mod を足したり改名したりしたとき黙って有効化から漏れる
@@ -456,8 +459,9 @@ target_claude_settings() {
           enabledPlugins: ([.plugins[]?.name | {("\(.)@\($m)"): true}] | add // {})
         }' "$mods_dir/.claude-plugin/marketplace.json" > "$mods_tmp"
         merge_inputs+=("$mods_tmp")
-        mods_note=" + mods"
-      fi
+        mods_tmps+=("$mods_tmp")
+        mods_note+=" + ${mods_dir##*/}"
+      done
       # why: 別リポは git pull で中身が変わるので、ファイル全体を混ぜると permissions /
       #      hooks を無審査で取り込む (allow は prefixes が safe-prefix に転写する)。
       local spinner_json="$HOME/projects/claude-spinner-verbs-japanese/spinner-verbs.json"
@@ -504,8 +508,8 @@ target_claude_settings() {
       if [ -n "$spinner_tmp" ]; then
         rm -f "$spinner_tmp"
       fi
-      if [ -n "$mods_tmp" ]; then
-        rm -f "$mods_tmp"
+      if [ "${#mods_tmps[@]}" -gt 0 ]; then
+        rm -f "${mods_tmps[@]}"
       fi
 
       safe_overwrite "$DOTFILES_DIR/.claude/settings.merged.json.tmp" \

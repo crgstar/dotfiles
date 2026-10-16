@@ -1,8 +1,8 @@
 ---
 name: meltype-update
 description: >-
-  Mac に入れた日本語入力 Meltype (yksr-melt/Meltype の公式配布 zip 版) を最新リリースへ更新するスキル。
-  「Meltype を更新して」「Meltype の新しい版を入れて」「Meltype をアップデート」等で使う。
+  Mac に入れた日本語入力 Meltype (yksr-melt/Meltype の公式配布 zip 版) を最新リリースへ更新・新規インストールするスキル。
+  「Meltype を更新して」「Meltype の新しい版を入れて」「Meltype をアップデート」「Meltype を入れて」等で使う。
   更新後に日本語にならない・入力ソースに Meltype が重複して並ぶ、といった更新起因の不調の復旧にも使う。
   対象外: Windows / Linux 版、ソースからビルドしている環境 (mac/update.sh の領分)、
   Homebrew tap で入れた別系統の Mac 版、Meltype の設定やユーザー辞書の編集。
@@ -18,8 +18,8 @@ description: >-
 
 ```bash
 app="$HOME/Library/Input Methods/Meltype.app"
-[ -d "$app" ] || { echo "Meltype が入っていない"; exit 1; }
-cur=$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")
+cur=none   # 未インストールでも exit しないのは、新規インストールも同じ手順で入れるため
+[ -d "$app" ] && cur=$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")
 latest=$(gh release view -R yksr-melt/Meltype --json tagName --jq .tagName | sed 's/^v//')
 [ -n "$latest" ] || { echo "最新版を取得できない"; exit 1; }
 echo "installed=$cur latest=$latest"
@@ -57,6 +57,7 @@ bash "$m/install.sh"
 `Meltype input server did not become ready` で終わっても、`pgrep -x Meltype` でプロセスが居れば成功している（macOS が先に起動した Meltype と衝突しただけ）。
 このとき Meltype を `pkill` / `launchctl remove` しない。止めると macOS が起動し直さず、入力ソースの登録も消えて日本語が打てなくなる。
 プロセスが居なければ、手順 4 を済ませてから「日本語にならないとき」へ進む。
+exit 0 で「まだ入力ソースとして有効になっていません。ログアウト…」と出ても、ログアウトを頼まず手順 4 へ進む。install.sh は入力ソースを選択済みで、打てるかは手順 5 で確かめるため。
 
 ## 4. 展開物を消す
 
@@ -69,12 +70,14 @@ d="<scratchpad>/meltype-$latest"; m="$d/x/Meltype-mac"
 trash "$d"
 ```
 
+`lsregister -u` が `-10814` を出すのは、外す対象が無いという意味なので無視してよい。
+
 ## 5. 確認
 
 ```bash
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
   | grep -E '^path:' | grep -i meltype        # Input Methods の 1 件だけ
-swift .claude/skills/meltype-update/scripts/input-sources.swift count   # 1
+swift .claude/skills/meltype-update/scripts/input-sources.swift count   # 1 (新規インストール直後は 2 でも可)
 plutil -extract CFBundleShortVersionString raw "$HOME/Library/Input Methods/Meltype.app/Contents/Info.plist"
 ```
 
@@ -82,6 +85,7 @@ plutil -extract CFBundleShortVersionString raw "$HOME/Library/Input Methods/Melt
 `Input Methods` 以外のパスが出たら `lsregister -u` で外す。そのパスが `~/Downloads` 配下なら、Finder でゴミ箱へ移すようユーザに頼む。
 
 最後にユーザに日本語を打ってもらう。
+新規インストール直後は `count` が 2 でも、打てれば手を入れない。
 
 ## 日本語にならないとき
 
@@ -89,4 +93,4 @@ plutil -extract CFBundleShortVersionString raw "$HOME/Library/Input Methods/Melt
 
 1. `swift .claude/skills/meltype-update/scripts/input-sources.swift reselect`
 2. `pgrep -x Meltype` が空なら、ユーザにログアウト → ログインしてもらう
-3. `count` が 1 にならない・まだ打てないなら、ユーザにシステム設定のキーボード → 入力ソースで Meltype を全部外し、「+」から入れ直してもらう
+3. まだ打てない、または更新時に `count` が 1 にならないなら、ユーザにシステム設定のキーボード → 入力ソースで Meltype を全部外し、「+」から入れ直してもらう

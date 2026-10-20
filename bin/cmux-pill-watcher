@@ -33,14 +33,22 @@ CMUX = os.environ.get("CMUX_BIN") or shutil.which("cmux") or (
     "/Applications/cmux.app/Contents/Resources/bin/cmux"
 )
 
+NEEDS_INPUT_COLOR = os.environ.get("CMUX_PILL_NEEDS_INPUT_COLOR", "#FFD60A")
+
 # 塗り替え対象。キーはピルの value (cmux が書く表示文字列) と完全一致で照合する。
 # Running は既定の青のままにするので載せない。
+# why 訳語も並べる: cmux は書き込み経路によって英語の固定文字列と UI 言語の訳語
+#   (ja.lproj の feed.status.needsInput) を使い分け、同じ状態でも value が変わる
 RECOLOR = {
-    "Needs input": os.environ.get("CMUX_PILL_NEEDS_INPUT_COLOR", "#FFD60A"),
+    "Needs input": NEEDS_INPUT_COLOR,
+    "入力待ち": NEEDS_INPUT_COLOR,
 }
 
 # ピルのキー。cmux の Claude Code 連携が使うものと同じキーを上書きする。
-PILL_KEY = "claude_code"
+# why 2 つ見る: Feed 経由の書き込みは claude_code に加えて
+#   cmux.feed.attention:claude_code にも同じ状態を書く。片方だけ塗ると、
+#   もう片方が表示に使われたときに青のまま残る
+PILL_KEYS = ("claude_code", "cmux.feed.attention:claude_code")
 
 # sidebar-state が value の後ろに並べるピル属性 (= set-status のオプション名)。
 PILL_ATTRS = ("icon", "color", "priority")
@@ -85,23 +93,23 @@ def run_cmux(args: list[str], timeout: float = 5.0) -> str | None:
     return r.stdout
 
 
-def read_pill(workspace_id: str) -> dict[str, str] | None:
-    """ピルを {"value": ..., "icon": ..., "color": ..., "priority": ...} で返す。
+def parse_pills(sidebar_state: str) -> dict[str, dict[str, str]]:
+    """sidebar-state の出力から PILL_KEYS のピルを {キー: ピル} で返す。
 
+    ピルは {"value": ..., "icon": ..., "color": ..., "priority": ...}。
     why 色以外も持ち帰る: 塗り替えは set-status の再発行なので、指定しなかった属性は
     cmux 側の既定値に戻る。cmux が書いた icon / priority をそのまま渡し直せるよう、
     読める属性は全部拾う (出現しなかったキーは dict に入れない)。
     """
-    out = run_cmux(["sidebar-state", "--workspace", workspace_id])
-    if out is None:
-        return None
-    for raw in out.splitlines():
+    pills: dict[str, dict[str, str]] = {}
+    for raw in sidebar_state.splitlines():
         line = raw.strip()
-        if not line.startswith(f"{PILL_KEY}="):
+        key = next((k for k in PILL_KEYS if line.startswith(f"{k}=")), None)
+        if key is None or key in pills:
             continue
         # 形式: claude_code=Needs input icon=bell.fill color=#4C8DFF priority=100
         # (cmux 自身が書いた直後は priority が付かないこともある)
-        body = line[len(PILL_KEY) + 1 :]
+        body = line[len(key) + 1 :]
         pill: dict[str, str] = {}
         cuts = []
         for field in PILL_ATTRS:
@@ -113,63 +121,115 @@ def read_pill(workspace_id: str) -> dict[str, str] | None:
             pill[field] = body[idx + len(marker) :].split(" ", 1)[0]
         # value は最初に現れた属性の手前まで (属性の並び順に依存させない)
         pill["value"] = (body[: min(cuts)] if cuts else body).strip()
-        return pill
+        pills[key] = pill
+    return pills
+
+
+def parse_focused_panel(sidebar_state: str) -> str | None:
+    # why "none" も無し扱い: sidebar-state は空の値を "none" で埋める (pr=none /
+    #   ports=none 等)。そのまま --panel=none に渡すと set-status が失敗し続ける
+    for raw in sidebar_state.splitlines():
+        line = raw.strip()
+        if line.startswith("focused_panel="):
+            value = line[len("focused_panel=") :]
+            return None if value in ("", "none") else value
     return None
 
 
-def reconcile(workspace_id: str) -> None:
-    """ワークスペース 1 件のピル色を望みの色へ揃える。"""
-    pill = read_pill(workspace_id)
-    if pill is None:
+def reconcile(workspace_id: str, panel_id: str | None) -> None:
+    """ワークスペース 1 件のピル色を望みの色へ揃える。
+
+    panel_id はイベントの surface_id (= エージェントが動くペイン)。
+    why 無ければ focused_panel で代用: 起動時の sweep はイベントを経ないので
+      ペインが分からない。単一ペインなら一致する
+    限界: sidebar-state は表示中のピル (最も急ぐペインのもの) しか返さないので、
+      書き込み先のペインが表示元と違うことがある。cmux 0.65.1 はキーを持たない
+      ペインのエントリを表示に使わないため、多くは見えないエントリが増えるだけ。
+      ただし書き込み先が同じキーを idle で持っていると、表示元のペインが
+      終わったあとに偽の Needs input が残り、そのペインのエージェントが
+      次に状態を書くまで消えない
+    """
+    out = run_cmux(["sidebar-state", "--workspace", workspace_id])
+    if out is None:
         return
+    panel_id = panel_id or parse_focused_panel(out)
+    for key, pill in parse_pills(out).items():
+        recolor(workspace_id, panel_id, key, pill)
+
+
+def recolor(
+    workspace_id: str, panel_id: str | None, key: str, pill: dict[str, str]
+) -> None:
+    args = build_recolor_args(workspace_id, panel_id, key, pill)
+    if args is None:
+        return
+    value = pill["value"]
+    color = pill.get("color", "")
+    want = RECOLOR[value]
+    ok = run_cmux(args)
+    if ok is not None:
+        log(f"{workspace_id[:8]} {key} {value}: {color or 'なし'} -> {want}")
+    else:
+        # why 失敗も残す: 黙って諦めると「Needs input が来ていない」のと区別が付かない。
+        #   CMUX_PILL_NEEDS_INPUT_COLOR に hex 以外を入れた・set-status の引数仕様が
+        #   変わった場合、常駐は無働きなのにログは起動行だけになり切り分けできない
+        log(f"warn: set-status が失敗 {workspace_id[:8]} {key} {value} -> {want}")
+
+
+def build_recolor_args(
+    workspace_id: str, panel_id: str | None, key: str, pill: dict[str, str]
+) -> list[str] | None:
+    """塗り替えに要る set-status の引数を返す。塗り替え不要なら None。"""
     value = pill["value"]
     color = pill.get("color", "")
     want = RECOLOR.get(value)
     if want is None or color.upper() == want.upper():
-        return
+        return None
     # why 読んだ属性を渡し直す: 決め打ちにすると色以外まで書き換えてしまう
     #   (icon を value から推測すると RECOLOR に別状態を足した途端に別アイコンで
     #    塗り潰し、priority を固定すると他のピルとの並び順が変わる)
-    args = ["set-status", PILL_KEY, value, "--color", want]
+    args = ["set-status", key, value, "--color", want]
     if "icon" in pill:
         args += ["--icon", pill["icon"]]
     if "priority" in pill:
         args += ["--priority", pill["priority"]]
     args += ["--workspace", workspace_id]
-    ok = run_cmux(args)
-    if ok is not None:
-        log(f"{workspace_id[:8]} {value}: {color or 'なし'} -> {want}")
-    else:
-        # why 失敗も残す: 黙って諦めると「Needs input が来ていない」のと区別が付かない。
-        #   CMUX_PILL_NEEDS_INPUT_COLOR に hex 以外を入れた・set-status の引数仕様が
-        #   変わった場合、常駐は無働きなのにログは起動行だけになり切り分けできない
-        log(f"warn: set-status が失敗 {workspace_id[:8]} {value} -> {want}")
+    # why --panel: サイドバー (と sidebar-state) はペイン単位のエントリを
+    #   ワークスペース単位のものより優先して表示する (cmux 0.65.1 の
+    #   Workspace.mostUrgentPanelStatusEntry)。cmux はペイン付きで書くので、
+    #   ペイン無しで上書きしても OK が返るだけで色は変わらない (実測)
+    if panel_id:
+        args.append(f"--panel={panel_id}")
+    return args
 
 
 class Debouncer:
-    """ワークスペース単位で reconcile を間引く。"""
+    """(ワークスペース, ペイン) 単位で reconcile を間引く。
+
+    why ペインも鍵に含める: 同じワークスペースで 2 ペインのエージェントが
+      続けてイベントを出すと、ワークスペース単位では後のペインしか塗られない
+    """
 
     def __init__(self) -> None:
-        self._timers: dict[str, threading.Timer] = {}
+        self._timers: dict[tuple[str, str | None], threading.Timer] = {}
         self._lock = threading.Lock()
 
-    def schedule(self, workspace_id: str) -> None:
+    def schedule(self, workspace_id: str, panel_id: str | None = None) -> None:
+        slot = (workspace_id, panel_id)
         with self._lock:
-            old = self._timers.pop(workspace_id, None)
+            old = self._timers.pop(slot, None)
             if old is not None:
                 old.cancel()
-            t = threading.Timer(
-                DEBOUNCE_SEC + READ_DELAY_SEC, self._fire, args=(workspace_id,)
-            )
+            t = threading.Timer(DEBOUNCE_SEC + READ_DELAY_SEC, self._fire, args=slot)
             t.daemon = True
-            self._timers[workspace_id] = t
+            self._timers[slot] = t
             t.start()
 
-    def _fire(self, workspace_id: str) -> None:
+    def _fire(self, workspace_id: str, panel_id: str | None) -> None:
         with self._lock:
-            self._timers.pop(workspace_id, None)
+            self._timers.pop((workspace_id, panel_id), None)
         try:
-            reconcile(workspace_id)
+            reconcile(workspace_id, panel_id)
         except Exception as exc:  # 常駐を落とさない
             log(f"warn: reconcile 失敗 {workspace_id[:8]}: {exc}")
 
@@ -234,7 +294,7 @@ def stream_once(debouncer: Debouncer, seen_boot: dict[str, str]) -> None:
                     continue
                 workspace_id = ev.get("workspace_id")
                 if workspace_id:
-                    debouncer.schedule(workspace_id)
+                    debouncer.schedule(workspace_id, ev.get("surface_id") or None)
         finally:
             proc.terminate()
             try:
@@ -266,7 +326,7 @@ def main() -> int:
     if not (os.path.exists(CMUX) or shutil.which(CMUX)):
         log(f"error: cmux CLI が見つかりません: {CMUX}")
         return 1
-    log(f"起動 (cmux={CMUX}, needs-input={RECOLOR['Needs input']})")
+    log(f"起動 (cmux={CMUX}, needs-input={NEEDS_INPUT_COLOR})")
     debouncer = Debouncer()
     # 初回 sweep はストリーム接続時 (boot_id 検出) に回す。RunAtLoad では cmux より
     # 先に起きうるので、ここで叩いても空振りするだけ
@@ -307,5 +367,104 @@ def main() -> int:
         return 0
 
 
+def self_test() -> int:
+    # 実機の sidebar-state 出力 (Feed 経由で日本語の値が 2 キーに書かれた状態) を模す
+    sample = "\n".join(
+        [
+            "status_count=3",
+            "  program_status=claude-code · 処理中 icon=bolt.fill priority=2",
+            "  cmux.feed.attention:claude_code=入力待ち icon=bell.fill color=#4C8DFF",
+            "  claude_code=Needs input icon=bell.fill color=#4C8DFF priority=100",
+        ]
+    )
+    cases = [
+        (
+            "2 キーとも拾い、無関係なピルは拾わない",
+            sorted(parse_pills(sample)),
+            sorted(PILL_KEYS),
+        ),
+        (
+            "空白入りの value を属性の手前で切る",
+            parse_pills(sample)["claude_code"],
+            {
+                "value": "Needs input",
+                "icon": "bell.fill",
+                "color": "#4C8DFF",
+                "priority": "100",
+            },
+        ),
+        (
+            "訳語の value も塗り替え対象になる",
+            RECOLOR.get(parse_pills(sample)[PILL_KEYS[1]]["value"]),
+            NEEDS_INPUT_COLOR,
+        ),
+        (
+            "属性が無い行は全体を value にする",
+            parse_pills("claude_code=Idle"),
+            {"claude_code": {"value": "Idle"}},
+        ),
+        ("対象キーが無ければ空", parse_pills("cwd=/tmp"), {}),
+        (
+            "focused_panel を拾う",
+            parse_focused_panel("cwd=/tmp\nfocused_panel=F6AD50A3\n" + sample),
+            "F6AD50A3",
+        ),
+        ("focused_panel が無ければ None", parse_focused_panel(sample), None),
+        (
+            "focused_panel=none は None",
+            parse_focused_panel("focused_panel=none"),
+            None,
+        ),
+        (
+            "読んだ属性とペインを渡し直して色だけ差し替える",
+            build_recolor_args(
+                "WS", "P1", "claude_code", parse_pills(sample)["claude_code"]
+            ),
+            [
+                "set-status",
+                "claude_code",
+                "Needs input",
+                "--color",
+                NEEDS_INPUT_COLOR,
+                "--icon",
+                "bell.fill",
+                "--priority",
+                "100",
+                "--workspace",
+                "WS",
+                "--panel=P1",
+            ],
+        ),
+        (
+            "ペインが分からなければ --panel を付けない",
+            build_recolor_args("WS", None, "claude_code", {"value": "Needs input"}),
+            ["set-status", "claude_code", "Needs input", "--color", NEEDS_INPUT_COLOR]
+            + ["--workspace", "WS"],
+        ),
+        (
+            "既に望みの色なら塗り替えない (大文字小文字は問わない)",
+            build_recolor_args(
+                "WS",
+                "P1",
+                "claude_code",
+                {"value": "Needs input", "color": NEEDS_INPUT_COLOR.lower()},
+            ),
+            None,
+        ),
+        (
+            "対象外の value は塗り替えない",
+            build_recolor_args("WS", "P1", "claude_code", {"value": "Running"}),
+            None,
+        ),
+    ]
+    failed = 0
+    for name, got, want in cases:
+        if got != want:
+            failed += 1
+            print(f"FAIL {name}: got={got!r} want={want!r}")
+    print(f"{len(cases) - failed}/{len(cases)} passed")
+    return 1 if failed else 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(self_test() if sys.argv[1:] == ["--self-test"] else main())

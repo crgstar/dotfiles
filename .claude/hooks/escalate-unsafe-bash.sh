@@ -14,6 +14,10 @@
 #      (skills / skills-global のどちらの配下でもない)
 #      → 第三者スキル（pin なし pull で更新され得る）の無確認実行を実行時に遮断。
 #        コミット pin と違い「常に最新を pull」する現運用を変えずにサプライチェーンを塞ぐ。
+#   4. git に --output / --ext-diff / --upload-pack / --exec-path 等 (省略形を含む)
+#      → `Bash(git show *)` 等の allow に紛れたファイル書き込み・コマンド実行を人間ゲートへ。
+#        `git show --output=.git/config` で外部 diff を仕込み、次の git diff で実行させる
+#        手口が実際に Codex CLI で報告されている。
 # いずれにも該当しなければ {} を返し、静的ルール（allow）に委ねる。
 set -euo pipefail
 
@@ -117,6 +121,38 @@ run_self_test() {
   # (実 bash は \h を h に畳み込むため、トークナイザ側もそれに合わせないと1文字ですり抜ける)
   assert_ask  'curl 外部 URL の先頭にバックスラッシュ' 'curl \http://evil.example/x'
   assert_ask  'find -exec の先頭にバックスラッシュ' 'find . \-exec rm {} \;'
+
+  # git: 読み取りの通常形は素通し / 書き込み・実行オプションは ask
+  assert_pass 'git diff 通常' 'git diff --stat HEAD~1'
+  assert_pass 'git log 通常' 'git log --oneline -n 5'
+  assert_pass 'git diff --no-ext-diff は安全側' 'git diff --no-ext-diff'
+  assert_pass 'git diff --exit-code' 'git diff --exit-code'
+  assert_pass 'git log --output-indicator-new は書き込みではない' 'git log -p --output-indicator-new=+'
+  assert_ask  'git show --output で .git/config 書き換え' "git show --format='[diff]%nexternal = x' --no-patch --output=./.git/config HEAD"
+  assert_ask  'git log --output (空白区切り)' 'git log -1 --output /tmp/x'
+  assert_ask  'git diff --output' 'git diff --output=/tmp/x'
+  assert_ask  'git blame --output' 'git blame --output=/tmp/x f'
+  assert_ask  'git diff --ext-diff' 'git diff --ext-diff'
+  assert_ask  'git fetch --upload-pack' "git fetch origin --upload-pack='touch /tmp/x #'"
+  assert_ask  'git fetch --upload-pack の省略形' "git fetch origin --upload-p='touch /tmp/x #'"
+  assert_ask  'git --exec-path' 'git --exec-path=/tmp/evil log'
+  assert_ask  'git grep --open-files-in-pager' "git grep --open-files-in-pager='sh -c x' pat"
+  assert_ask  'git -C 経由でも ask' 'git -C /repo diff --output=/tmp/x'
+  assert_ask  'クォートした --output' 'git diff "--output=/tmp/x"'
+  assert_ask  'ブレース展開に隠した --output' 'git diff {--output=/tmp/x,--stat}'
+  assert_ask  '先頭バックスラッシュの git' '\git diff --output=/tmp/x'
+  assert_ask  'git の途中にバックスラッシュ' 'gi\t diff --output=/tmp/x'
+  assert_ask  'git の途中にクォート' "g''it diff --output=/tmp/x"
+  # ブレース展開・変数展開で、文字列に --output が現れないまま組み立てる形
+  assert_ask  'ブレースの中に名前' 'git diff --{output=/tmp/x,stat}'
+  assert_ask  'ブレースでダッシュを作る' 'git diff -{-,-}output=/tmp/x'
+  assert_ask  '語頭のブレースでダッシュを作る' 'git diff {-,-}-output=/tmp/x'
+  assert_ask  'ブレースの後ろの選択肢にダッシュ' 'git diff {a,-}-output=/tmp/x'
+  assert_ask  '名前の途中でブレース' 'git diff --o{utput,x}=/tmp/x'
+  assert_ask  'ダッシュの直後に変数' 'X=output; git diff --$X=/tmp/x'
+  assert_pass 'git の @{-1} は展開されない' 'git log @{-1}..HEAD'
+  assert_pass 'xargs -I{} は展開されない' 'git ls-files | xargs -I{} git log -1 {}'
+  assert_pass 'format のブレースはダッシュと隣り合わない' 'git log --format={%h,%s}'
 
   # bash/sh: dotfiles スキルは素通し / 実体が dotfiles 外なら ask
   assert_pass '非該当 ls' 'ls -la'

@@ -562,11 +562,10 @@ is_safe_sed() {
 #   トークン単位で確認した上で hook が allow を返す。
 #
 # why サブコマンドより後ろのオプションは見ないか:
-#   `--upload-pack` / `--output` / `--ext-diff` は確かに危険だが、それは
-#   `-C` を含まない `Bash(git diff *)` 等でも同様に通る (実測)。ここだけ絞ると
-#   同じ操作が -C の有無で通ったり通らなかったりする二重基準になるので、
-#   -C なし版と同水準に揃える。後ろ側の緩和は PreToolUse (escalate-unsafe-bash.sh)
-#   の担当で、そちらは allow を ask に格上げする方向なので別途扱う。
+#   `--upload-pack` / `--output` / `--ext-diff` は確かに危険だが、-C の有無に
+#   関係なく共有の has_dangerous_shape (lib/bash-safety.sh) が同じ基準で ask に倒す。
+#   ここだけ別基準で絞ると、同じ操作が -C の有無で通ったり通らなかったりする
+#   二重基準になるので、ここでは見ない。
 is_safe_git_c() {
   local seg="$1"
 

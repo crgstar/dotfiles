@@ -116,6 +116,12 @@ has_dangerous_shape() {
   [[ "$cmd" =~ (^|[[:space:]])curl[[:space:]] ]] && has_curl=1
   [ -n "$skills_dir" ] && [[ "$cmd" =~ (^|[[:space:]])(bash|sh)[[:space:]] ]] && has_shell=1
 
+  # git はトークン化せずに判定するので、下の早期 return より前に済ませる
+  # (理由は _git_dangerous_opt の説明)
+  if _git_dangerous_opt "$cmd"; then
+    return 0
+  fi
+
   # why 早期 return: このフックが最も頻繁に見る `gh api ...` のようなセグメントは
   # find/curl/bash のいずれも含まない。該当しない cmd にまで char-by-char の
   # tokenize_quoted を走らせるのは無駄で、呼び出し側 (segment-allow.sh の
@@ -190,6 +196,63 @@ has_dangerous_shape() {
 
   return 1
 }
+
+# git の書き込み・コマンド実行オプションを含むなら理由を stdout に出して 0、
+# 含まなければ 1 を返す(純粋関数)。
+#
+# why トークン化しない: tokenize_quoted は 1 文字ずつ回すので、git に触れる
+#   大きなヒアドキュメント (2.5 万字) で 9 秒かかった。この hook は全 Bash 呼び出しで
+#   走る。代わりにクォートとバックスラッシュを消した文字列から `--名前` を拾う。
+#   bash は `--out""put` / `-\-output` / `g\it` を連結して元の語にするので、
+#   消してから探せば同じ語が現れる。クォートの中身 (コミットメッセージ等) まで
+#   拾うので確認が増える側に倒れる。
+# why 1 本の正規表現で当てる: `--名前` を 1 つずつ拾って残りを切り詰めるループは、
+#   切り詰めのたびに残り全体を複製するので、オプションの多いヒアドキュメントで
+#   出現数 × 長さの時間がかかる (7.6 万字・6000 個で 3 秒台)。
+# why git の語境界を見ない: `\git` や `xargs git` のように git の前が空白とは限らない。
+# why 展開の形も見る: `--{output=x,stat}` / `-{-,-}output=x` / `--$X` は、
+#   文字列に `--output` が現れないまま bash の展開で `--output` になる。
+#   ダッシュとブレース展開 (`{` と `,` / `..` が同じ語にある) や `$` が隣り合う形は
+#   中身を問わず確認に回す。`@{-1}` / `xargs -I{}` はカンマが無く展開されないので通す。
+#   `{-` の後ろは `..` を見ない: 連番展開がダッシュを出すのは負の整数だけで、
+#   オプション名の文字は作れない。見ると `@{-1}..HEAD` まで確認に落ちる。
+# 限界: `$'\055\055output'` (ANSI-C クォート) と、語頭の変数で `-` を作る形
+#   (`X=-; git diff $X-output=f`) は拾えない。tokenize_quoted も展開を解釈しないので、
+#   トークン方式にしても変わらない。
+_git_dangerous_opt() {
+  local cmd="$1" s
+  s="${cmd//[\"\'\\\`]/}"
+  [[ "$s" == *git* ]] || return 1
+  if [[ "$s" =~ --($_GIT_DANGEROUS_OPT_ALT)([^A-Za-z-]|$) ]]; then
+    printf 'git の危険なオプション: --%s (ファイル書き込み / コマンド実行の可能性)' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$s" =~ $_GIT_OPT_EXPANSION_RE ]]; then
+    printf 'git のオプションをシェル展開で組み立てている可能性: %s' "${BASH_REMATCH[0]}"
+    return 0
+  fi
+  return 1
+}
+
+# 危険な git オプション名 (先頭の -- を除く)。
+# - output: log / show / diff / blame / archive が任意パスへ書き出す。.git/config を
+#   書き換えれば次の git diff / status で任意コマンドが動く (Pillar Security の GitPwned)
+# - ext-diff: リポジトリ設定の diff.external を起動する
+# - upload-pack / receive-pack / exec / exec-path: 指定したコマンドを git が起動する
+# - open-files-in-pager: git grep -O の long form。pager としてコマンドを起動する
+#
+# why 前方一致 (2 文字以上の前方部分を全部並べる): git の parse-options は一意に決まる
+#   省略形を受け付ける (`git fetch --upload-p=<cmd>` で実行されることを実測)。diff 系の
+#   --output は省略を受けないが、サブコマンドごとの違いを持たずに済むよう一律に見る。
+#   1 文字 (`--o`) は曖昧で git 側も受けないので対象外。
+_GIT_DANGEROUS_OPT_ALT=''
+for _d in output ext-diff upload-pack receive-pack exec exec-path open-files-in-pager; do
+  for ((_i = 2; _i <= ${#_d}; _i++)); do
+    _GIT_DANGEROUS_OPT_ALT+="${_GIT_DANGEROUS_OPT_ALT:+|}${_d:0:_i}"
+  done
+done
+unset _d _i
+_GIT_OPT_EXPANSION_RE='-[A-Za-z-]*\{[^[:space:]]*(,|\.\.)|\{-[^[:space:]]*,|\{[^[:space:]]*,-|-[A-Za-z-]*\$'
 
 # クォート（' " `）とクォート外のエスケープを尊重して、コマンド文字列を
 # 「直前の区切り種別 + コマンド」の並びに分解する(純粋関数)。

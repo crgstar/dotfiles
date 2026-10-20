@@ -290,7 +290,10 @@
   "autoMemoryEnabled": true,
   "skipWorkflowUsageWarning": true,
   "env": {
-    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "core.fsmonitor",
+    "GIT_CONFIG_VALUE_0": "false"
   },
   "theme": "dark-ansi",
   "verbose": false,

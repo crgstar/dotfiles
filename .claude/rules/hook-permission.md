@@ -16,7 +16,7 @@ hook を新規追加・改修するとき、`permissions.allow` を触るとき�
 
 ## 典型パターン
 
-- 「デフォ allow + 危険なパターンだけ hook で ask/deny 格上げ」→ PreToolUse（実例: `escalate-unsafe-bash.sh`。`find -exec`/`-delete`・非 localhost 宛て `curl`・dotfiles 外の skills スクリプト実行を ask に格上げ。`--self-test` あり / `pr-comment-signature.sh`。後述）
+- 「デフォ allow + 危険なパターンだけ hook で ask/deny 格上げ」→ PreToolUse（実例: `escalate-unsafe-bash.sh`。`find -exec`/`-delete`・非 localhost 宛て `curl`・dotfiles 外の skills スクリプト実行・git の `--output` / `--upload-pack` 等を ask に格上げ。`--self-test` あり / `pr-comment-signature.sh`。後述）
 - 「デフォ ask + 安全なパターンだけ hook で allow に素通し」→ PermissionRequest（実例: `segment-allow.sh` / `scratchpad-rm-allow.sh`）
 
 hook handler には `if` フィールドで permission rule 構文の絞り込みを書ける（`"if": "Bash(rm *)"`）。1 handler に 1 ルールだけで `&&`/リスト構文は無い（複数条件は handler を分ける）。マッチしないときはプロセスを起動しないので、同じ matcher に用途別の handler を並べてよい。ただしコマンドがパースできないと fail open（`if` を無視して起動）するため、hook 側の判定は `if` に依存せず単独で完結させる。
@@ -126,14 +126,59 @@ allow を返す条件は、トークン分割した結果が下記すべてを�
 - クォート内に改行を含むセグメントは無条件で unsafe (`is_safe_sed` と同じ理由。
   `tokenize_quoted` の出力が改行区切りなのでトークン境界がずれ、サブコマンド位置を誤読する)
 
-**サブコマンドより後ろのオプションは検査しない。** `--upload-pack` (任意コマンド実行)・
-`--output` (任意パス書き込み)・`--ext-diff` はいずれも危険だが、`-C` を含まない
-`Bash(git diff *)` / `Bash(git fetch *)` でも同様に通る (実測)。ここだけ絞ると同じ操作が
-`-C` の有無で通ったり通らなかったりする二重基準になるので、`-C` なし版と同水準に揃えている。
-後ろ側を締めるなら allow → ask の格上げ側 (PreToolUse の `escalate-unsafe-bash.sh`) の担当。
+**`is_safe_git_c` 自身はサブコマンドより後ろのオプションを検査しない。** `--upload-pack`
+(任意コマンド実行)・`--output` (任意パス書き込み)・`--ext-diff` は、`-C` の有無に関係なく
+共有の `has_dangerous_shape` が ask に倒す (下記「git の危険なオプション」)。ここだけ別基準で
+絞ると、同じ操作が `-C` の有無で通ったり通らなかったりする二重基準になる。
 なお git は設定によるフック機構を持つため、リポジトリ自身の `.git/config` に
 `diff.external` を書けばオプション無しの `git diff` でも任意コマンドが走る。
-permission ルールでこの経路は閉じられない。
+permission ルールでこの経路は閉じられない (`core.fsmonitor` だけは env で塞いでいる。後述)。
+
+### git の危険なオプション (`_git_dangerous_opt`)
+
+`Bash(git show *)` / `git log *` / `git diff *` / `git blame *` / `git fetch *` は静的 allow に
+あり、公式ドキュメントも `Bash(git log * main)` が `git log --output=<file> main` に一致すると
+例示している。`git show --format='[diff]%nexternal = <cmd>' --no-patch --output=./.git/config HEAD`
+で外部 diff を仕込み、次の `git diff` で実行させる手口が Codex CLI で報告された
+(Pillar Security「GitPwned: Allowlist to RCE」、2026)。そこで `lib/bash-safety.sh` の
+`_git_dangerous_opt` が、`output` / `ext-diff` / `upload-pack` / `receive-pack` / `exec` /
+`exec-path` / `open-files-in-pager` の long option を ask に格上げする。
+`escalate-unsafe-bash.sh` と `segment-allow.sh` の両方が `has_dangerous_shape` 経由で使う。
+
+- **前方一致で見る。** git の parse-options は一意に決まる省略形を受け付け、
+  `git fetch --upload-p=<cmd>` で実行されることを実測した (git 2.52)。diff 系の `--output` は
+  省略形を受けない (`--outp` は書き込まれない) が、サブコマンドごとの違いを持たずに一律で見る
+- **トークン化しない。** `tokenize_quoted` は 1 文字ずつ回すので、git に触れる 2.5 万字の
+  ヒアドキュメントで 9 秒かかった (全 Bash 呼び出しで走る hook)。クォートとバックスラッシュを
+  消した文字列から `--名前` を拾う。bash は `--out""put` / `-\-output` / `g\it` を連結して元の語に
+  するので、消してから探せば同じ語が現れる。クォートの中身 (コミットメッセージ等) も拾うので、
+  確認が増える側に倒れる
+- **1 本の正規表現で当てる。** `--名前` を 1 つずつ拾って残りを切り詰めるループは、切り詰めの
+  たびに残り全体を複製するので、オプションの多いヒアドキュメントで 3 秒台かかった
+- **展開でオプションを組み立てる形も確認に回す。** `--{output=x,stat}` / `-{-,-}output=x` /
+  `--o{utput,x}` / `--$X` は文字列に `--output` が現れないまま bash の展開で `--output` になる。
+  ダッシュとブレース展開 (`{` と `,` が同じ語にある) や `$` が隣り合う形は中身を問わず ask。
+  カンマの無い `@{-1}` / `xargs -I{}` は展開されないので通す
+- 限界: `$'\055\055output'` (ANSI-C クォート) と、語頭の変数で `-` を作る形
+  (`X=-; git diff $X-output=f`) は拾えない (`tokenize_quoted` も展開を解釈しないので
+  トークン方式でも同じ)。短縮形 (`git grep -O`) は対象外 — `git grep` は `is_safe_git_grep` の
+  ホワイトリストが担う。列挙方式なので、ここに無い書き込み・実行オプションは通る
+
+### Claude が起動する git の `core.fsmonitor` を env で切る
+
+`core.fsmonitor` は `status` / `diff` / `fetch` / `ls-files` が index を更新するときに、
+リポジトリの `.git/config` に書かれたコマンドを起動する。`settings.json` の `env` で
+`GIT_CONFIG_COUNT=1` / `GIT_CONFIG_KEY_0=core.fsmonitor` / `GIT_CONFIG_VALUE_0=false` を渡すと、
+コマンドライン相当の設定としてリポジトリ設定より優先され、仕込まれた fsmonitor は起動しない
+(git 2.52 で実測)。ユーザがターミナルで打つ git には影響しない。
+
+- `base` (`.claude/settings.json`) に置く。クラウド routine も同じ保護を受けてよいため
+- `diff.external` は同じ方法で無効化できない。`GIT_CONFIG_VALUE=` (空) にすると、diff.external が
+  未設定のリポジトリでも全ての `git diff` が `cannot run` で失敗した (Pillar の記事は
+  `git -c diff.external= diff` を勧めているが、git 2.52 では成立しない)。こちらは上の
+  `--output` / `--ext-diff` の格上げで書き込み側を塞ぐ
+- `GIT_CONFIG_COUNT` を別の用途で使いたくなったら、番号を足して同じ env に並べる
+  (後から設定した側が丸ごと上書きするので、片方が消える)
 
 ### git grep の構造判定 (`is_safe_git_grep`)
 

@@ -77,7 +77,7 @@ trash "$d"
 ```bash
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
   | grep -E '^path:' | grep -i meltype        # Input Methods の 1 件だけ
-swift .claude/skills/meltype-update/scripts/input-sources.swift count   # 1 (新規インストール直後は 2 でも可)
+swift .claude/skills/meltype-update/scripts/input-sources.swift count   # Meltype の入力ソース件数。1 が正常 (新規インストール直後は 2 でも可)
 plutil -extract CFBundleShortVersionString raw "$HOME/Library/Input Methods/Meltype.app/Contents/Info.plist"
 ```
 
@@ -91,6 +91,6 @@ plutil -extract CFBundleShortVersionString raw "$HOME/Library/Input Methods/Melt
 
 順に試し、各段で打ってもらう。
 
-1. `swift .claude/skills/meltype-update/scripts/input-sources.swift reselect`
+1. `swift .claude/skills/meltype-update/scripts/input-sources.swift reselect`（ABC に切り替えてから Meltype に戻し、接続を張り直す）
 2. `pgrep -x Meltype` が空なら、ユーザにログアウト → ログインしてもらう
 3. まだ打てない、または更新時に `count` が 1 にならないなら、ユーザにシステム設定のキーボード → 入力ソースで Meltype を全部外し、「+」から入れ直してもらう

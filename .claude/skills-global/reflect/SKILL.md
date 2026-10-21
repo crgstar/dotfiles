@@ -210,7 +210,7 @@ extractor の返却を**一字一句そのまま**テキスト出力する（mai
 ### 提案の書き込み
 
 - `~/dotfiles/.local/reflect-proposals/pending/<YYYYMMDD>-<セッション ID (UUID) の先頭 8 文字>-<連番>.md` に保存する（連番は同一プレフィックスの既存ファイルと衝突しない次の番号）。
-- frontmatter を自分で付与する: `id`（ファイル名から `.md` を除いたもの）/ `status: pending` / `target` / `repo`（`~/dotfiles/` 配下なら `dotfiles`、`~/projects/<name>/` 配下なら `<name>`、それ以外は `other` — ドライバの導出規則と同じ）/ `kind` / `title` / `source: reflect-interactive` / `source_session` / `source_cwd` / `created`（今日の日付）/ `decided:`（空）/ `note: ""`。
+- frontmatter を自分で付与する: `id`（ファイル名から `.md` を除いたもの）/ `status: pending` / `target` / `repo`（`~/dotfiles/` 配下なら `dotfiles`、`~/projects/<name>/` 配下なら `<name>`、それ以外は `other` — ドライバ（`run-headless.sh`。提案の保存や frontmatter 付与を行う claude 外のスクリプト）の導出規則と同じ）/ `kind` / `title` / `source: reflect-interactive` / `source_session` / `source_cwd` / `created`（今日の日付）/ `decided:`（空）/ `note: ""`。
 - 本文は書き込み案の「## 経緯」「## 理由」「## 変更内容」をそのまま。変更内容の形は §6 REFLECT-PROPOSAL の規約に従う（before/after・append のフェンス、**1 提案 1 変更**）。
 - **target が `~/dotfiles/` 配下（PUBLIC 宛）のとき**は保存後にサニタイズ監査を行う:
   - `Agent` ツール（`subagent_type: sanitize-auditor`）に (1) 検査対象 = 提案の title + 「## 変更内容」セクション (2) 判定基準 = `~/dotfiles/.claude/rules/sanitize-criteria.md` の絶対パス、を渡す
@@ -248,9 +248,9 @@ extractor の返却を**一字一句そのまま**テキスト出力する（mai
 - **§3・§4 の置換（人間プレビューなし・書き込みをしない）**: Write を使わない（権限もない）。結果は下記マーカーの最終メッセージだけで返し、ファイル保存はドライバが行う。dotfiles 宛提案のサニタイズ監査もドライバが保存時に行う（`sanitized:` スタンプ）ので、このモードでは `sanitize-auditor` を呼ばない。人間確認が消える分は下記の重複抑止と §2.7 の採用バーで補う。
 - **推奨先が memory のもの**は `REFLECT-MEMORY` ブロック（後述）で返す。書き込みはドライバが行う。
 - **それ以外**（スキル指摘・CLAUDE.md・任意ドキュメント・権限見直し等、dotfiles 管理ファイルに限らない対象宛）は `REFLECT-PROPOSAL` ブロック（後述）で返す。保存はドライバが行う（人間の採用/破棄判断は常設ビューアが担う。本スキルはファイル移動や対象ファイルへの適用を行わない）。
-  - **target は必ず実在しうる具体的な絶対パス 1 つに落とす**。権限見直しや運用方針のように特定ファイルに直結しない教訓は、その方針を書き込むべき統轄ドキュメント（例: 権限なら該当 `settings.json`、汎用の作法なら効かせたい階層の `CLAUDE.md`）を target に選ぶ。どのファイルにも紐づけられないものは提案として成立しないので**落とす**（空・相対 target で返すとドライバが毎晩 hold に積むだけになる。ビューアに乗る形にできないなら §2.7 の「迷ったら落とす」で処理する）。
+  - **target は必ず実在しうる具体的な絶対パス 1 つに落とす**。権限見直しや運用方針のように特定ファイルに直結しない教訓は、その方針を書き込むべき統轄ドキュメント（例: 権限なら該当 `settings.json`、汎用の作法なら効かせたい階層の `CLAUDE.md`）を target に選ぶ。どのファイルにも紐づけられないものは提案として成立しないので**落とす**（空・相対 target で返すとドライバが毎晩 hold（人間判断待ちの退避ディレクトリ）に積むだけになる。ビューアに乗る形にできないなら §2.7 の採用バー（一回性のものは落とす）で落とす）。
   - **ユーザグローバル CLAUDE.md への教訓は `~/dotfiles/.claude/CLAUDE.md` を target にする**（`~/.claude/CLAUDE.md` は setup.sh が再生成する gitignore 済み merged ファイルへの symlink で、生成元でないため採用不能）。
-  - **`kind: claude-md` の提案は、変更内容を確定する前に必ず `Skill` ツールで `claude-md-guide` をロードし、その原則に従う**（スキル一覧に名前が載るだけでは中身は入らないので、明示的にロードする。`reflect` 自身と違い `disable-model-invocation` が無いのでヘッドレスからもロードできる）。CLAUDE.md は全セッションの毎ターンに読み込まれるコンテキスト枠で、1 行増やすとすべての作業にその分が乗り続けるため、**行数の増加そのものがコスト**。新しい箇条・見出しを足す前に、既存の箇条に 1 文足す・適用範囲を広げるだけで同じ効果が出ないかを先に検討し、出るならそちらを選ぶ。既存箇条の言い換えにしかならないものは §2.7 の「迷ったら落とす」で落とす。
+  - **`kind: claude-md` の提案は、変更内容を確定する前に必ず `Skill` ツールで `claude-md-guide` をロードし、その原則に従う**（スキル一覧に名前が載るだけでは中身は入らないので、明示的にロードする。`reflect` 自身と違い `disable-model-invocation` が無いのでヘッドレスからもロードできる）。CLAUDE.md は全セッションの毎ターンに読み込まれるコンテキスト枠で、1 行増やすとすべての作業にその分が乗り続けるため、**行数の増加そのものがコスト**。新しい箇条・見出しを足す前に、既存の箇条に 1 文足す・適用範囲を広げるだけで同じ効果が出ないかを先に検討し、出るならそちらを選ぶ。既存箇条の言い換えにしかならないものは §2.7 の採用バー（一回性のものは落とす）で落とす。
   - **`kind: skill` の提案は、変更内容を確定する前に必ず `Skill` ツールで `skill-creator:skill-creator` と `skill-md-guide` の両方をロードし、その原則に従う**（前者がスキル改修のフロー全体、後者が SKILL.md の書き味の原則を持つ）。どちらも `disable-model-invocation` が無いのでヘッドレスからロードできる。
   - **target は勘で確定させず、必要なら read-only additionalDirectories（`~/projects`・`~/dotfiles`）経由で実在・現状を確認する**。
 - memory の書き込み先ディレクトリは「引数 transcript と同じディレクトリ直下の `memory/`」（= `dirname(transcript)/memory/`。プロジェクト名のエスケープ計算はしない）。
@@ -318,7 +318,7 @@ REFLECT-SUMMARY>>>
 
 ## §6a. 再提案（regenerate）モード
 
-`run-headless.sh` の再提案サイクル（設計書 `reflect-b-autoconsume-design.md` 決定13・13a）専用の呼び出し形。夜間 run の queue 処理の前、または手動即時実行 `--regenerate-only` から、pending の `status: regenerate` 1 件ごとに 1 回このモードで headless claude を起動する。§6 との差分だけ示す（示していない箇所は §6 と同じ。マーカー形式・フェンス規約・「1 提案 1 変更」等はすべて踏襲する）。
+`run-headless.sh` の再提案サイクル（提案ビューアが pending に `status: regenerate` を書き、翌晩または `--regenerate-only` で作り直す仕組み。設計書 `reflect-b-autoconsume-design.md` の決定13・13a）専用の呼び出し形。夜間 run の queue 処理の前、または手動即時実行 `--regenerate-only` から、pending の `status: regenerate` 1 件ごとに 1 回このモードで headless claude を起動する。§6 との差分だけ示す（示していない箇所は §6 と同じ。マーカー形式・フェンス規約・「1 提案 1 変更」等はすべて踏襲する）。
 
 - **入力**: transcript ファイルではなく、ドライバがプロンプト本文に直接埋め込む。埋め込まれる文脈は次の 2 つ:
   1. **元提案ファイルの全文**（frontmatter を含む。`target` / `kind` / `title` / `note` / `## 経緯` / `## 理由` を含む）

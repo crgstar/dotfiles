@@ -19,7 +19,7 @@ description: >
 ## いつ使うか
 
 AskUserQuestion (組み込みツール) は 1 行問いには素直だが、**質問本文に表現力を
-持たせられない**。desc が 1 行で済まない (比較表・before/after コード・SVG/JS 図・
+持たせられない**。質問に添える説明 HTML (以下 desc) が 1 行で済まない (比較表・before/after コード・SVG/JS 図・
 段階的な背景説明) か、複数問・rank が要るときは auq-web。1 行問いは AskUserQuestion。
 迷ったら auq-web。
 

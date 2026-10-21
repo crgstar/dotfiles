@@ -683,6 +683,8 @@ target_skills() {
   #      mirugit を入れてから使う。
   link_file "$DOTFILES_DIR/.claude/skills-global/annotate-review-flow/SKILL.md" \
             "$HOME/.claude/skills/annotate-review-flow/SKILL.md"
+  link_file "$DOTFILES_DIR/.claude/skills-global/annotate-review-flow/references/bad-example.md" \
+            "$HOME/.claude/skills/annotate-review-flow/references/bad-example.md"
 
   # ----- auq-web skill -----
   # why: auq-web は SKILL.md/references (Claude が読むテキスト) を他スキルと同じく

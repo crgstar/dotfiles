@@ -13,8 +13,7 @@
     "ask": [
       "Bash(git push *)",
       "Bash(gh pr create *)",
-      "Bash(rm *)",
-      "Bash(gh api *)"
+      "Bash(rm *)"
     ]
   },
   "hooks": {
@@ -36,6 +35,15 @@
           {
             "type": "command",
             "command": "npx -y ccstatusline@latest --hook"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/segment-allow.sh"
           }
         ]
       }

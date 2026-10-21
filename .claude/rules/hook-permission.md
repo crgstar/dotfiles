@@ -5,9 +5,9 @@ hook を新規追加・改修するとき、`permissions.allow` を触るとき�
 
 ## hook の種類
 
-- **PreToolUse**: 全ツール呼出で発火。allow を ask / deny に「厳しくする」方向のみ有効。静的 `ask` を `allow` に緩めることはできない
+- **PreToolUse**: 全ツール呼出で発火。`allow` は確認を飛ばすが、**静的 `ask` / `deny` に一致すると負ける**（hooks.md「`"allow"` skips the permission prompt ... Deny and ask rules are still evaluated regardless」）。静的 `ask` を `allow` に緩めることはできない。`ask` は auto mode でも確認になる（CHANGELOG 2.1.211）
 - **PostToolUse**: ツール呼出完了後に発火。結果の後処理・ログ記録などに使う。permission 決定には関与しない
-- **PermissionRequest**: 静的 `ask` が確定した瞬間にだけ発火。**`ask` を `allow` に緩める唯一の方法**（ask を答える役）。**ヘッドレス (`claude -p`) では発火しない**（公式明記。2026-07 確認）
+- **PermissionRequest**: 確認ダイアログを出す直前に発火（静的 `ask` 由来に限らない）。**静的 `ask` を `allow` に緩める唯一の方法**（ask を答える役）。**ダイアログと並行して走り、先に答えた方が採用される**（後述「PermissionRequest の allow がダイアログに負ける」）。ヘッドレスでの発火は 2026-07 に「しない」と確認したが、CHANGELOG 2.1.268 に "Fixed PermissionRequest hooks not firing in `--print` mode" があり、現行の hooks.md も発火すると書いている（未実測）
 - **Stop**: Claude がターンを終了した直後に発火。セッション終了通知など副作用に使う。permission 決定には関与しない
 - **SessionEnd**: セッション終了直後に発火する副作用 hook（ブロック不可）。入力 JSON は `session_id` / `transcript_path`（絶対パス）/ `cwd` / `reason`。matcher に reason（`clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other`）を指定できる。**ヘッドレスでも発火する**（reason: `prompt_input_exit`）ので、hook からヘッドレス claude を起動する構成では自己ループ防止の除外ガードが要る（例: `reflect-enqueue.sh` の `REFLECT_HEADLESS`）
   - reason=`resume` は**対話中の `/resume` 切替で「離脱する側」のライブセッション**に発火する（hooks.md の Reason 表 "Session switched via interactive /resume"。CHANGELOG v2.1.79 の修正エントリも同前提）。resume される側は SessionStart（source=`resume`）
@@ -235,6 +235,57 @@ PermissionRequest hook はヘッドレスで発火しない。`reflect` は
 `git -C ~/dotfiles ...` と書いている限りでしか当たらない。SKILL.md 側の表記を
 絶対パスや `$HOME/dotfiles` に変えると、ヘッドレスでは hook も効かず黙って
 スキル列挙が落ちる。片方を変えるときはもう片方も揃えること。
+
+### PermissionRequest の allow がダイアログに負ける (gh api は PreToolUse で判定する)
+
+PermissionRequest hook の allow は確認ダイアログと競争する。Claude Code 2.1.304 の本体を読んだ
+範囲では、確認が必要になるとダイアログの表示と PermissionRequest hook の実行を同時に始め、
+先に答えた方を採用する。さらに組み込みの `cc-plugin-sec-default@builtin`（Team / Enterprise
+組織や managed settings のある端末で一番外側に入る hooks module）が settings の hook を包むと、
+**全 hook の結果が揃うまで決定が上に渡らない**。debug ログには
+`hooks module cc-plugin-sec-default@builtin classic.PermissionRequest settled in ...` と出る。
+
+cmux は Claude の起動時に `--settings` で PermissionRequest hook `cmux hooks feed --source claude`
+（timeout 125、Feed での承認を最大約 115 秒待つ）を注入する。これが同居すると segment-allow が
+0.04 秒で allow を返しても届かず、毎回ダイアログで決着する（2026-10 実測。cmux 外では 9/9 で通る）。
+
+そこで `gh api` は静的 ask に置かず、PreToolUse で判定する (`segment-allow.sh` の `pretool_decision`)。
+
+- 読み取りと判定できたら PreToolUse の `allow`。確認の手前で効くので PermissionRequest の競争に入らない。
+  判定は PermissionRequest 側と同じ `evaluate_command`（git -C / git grep も同じ理由で PreToolUse で通る）
+- それ以外で **gh api が語として現れるコマンドは、どこに現れても `ask`**。heredoc の本文・コメント・
+  grep のパターン・コミットメッセージも区別しない
+  - **「実行しない形」を見分けて素通しする方式は採らないこと。** 2 度試して 2 度とも書き込みが素通りした
+    (コードレビューで実 bash 実測)。列挙方式は `stdbuf` / `watch` / `case` 文 / プロセス置換 / `awk system()` /
+    `env -S` / git alias が漏れ、白名簿方式は heredoc の誤読 (コメント中の `<<`・`\<<`・`<<'E:F'`) とコメント中の
+    `'` が次の行を文字列に取り込む形で漏れた。bash の構文を自前で正確に読むのは無理があり、読み違いが
+    そのまま書き込みの素通りになる。語として現れたら ask にすれば、読み違えても ask 側に倒れる
+  - gh api の検出は `_normalize_for_mention` を通す。bash が語を組み立て直す形
+    (`"gh" api` / `{gh,} api` / `gh${IFS}api` / `/bin/g[h] api` / `$(which gh) api` / 行継続) も gh api として拾う
+  - `gh` の綴りは大小文字を問わず、`?` / `*` も含めて拾う。macOS の既定の APFS は大小文字を区別しないので
+    `GH api` で gh が起動する (実測)。`/opt/homebrew/bin/g? api` も同じ
+- gh api のフラグ検査 (`is_safe_gh_rest` / `is_safe_gh_graphql` / `_gh_headers_ok`) は、値を取らない `-i` に連結した
+  短縮フラグをほどいてから見る (`_gh_tokens`)。pflag は `-iX DELETE` / `-iXDELETE` / `-iF title=x` を `-i` + `-X ...` と
+  解釈する (gh 2.98 で実測) ので、ほどかないと連結したトークンが未知の語として読み飛ばされ、書き込みが allow になる
+  - 誤検知の量: 直近 600 セッションの gh api を含むコマンド 412 件のうち、11 件 (文書・コミットメッセージ・
+    grep のパターンに書いただけ) が確認になる。安全側の誤りとして許容している
+- 長いコマンドは allow の判定に掛けない (bash 5 は 8000 字、bash 3.2 は 2000 字が上限)。evaluate_command は
+  1 文字ずつ回すので長さに対して急に遅くなる (bash 5.3 で 8000 字 1 秒・25000 字 6〜15 秒、bash 3.2 は 7900 字で
+  32 秒)。allow になる gh api は実ログで最長 1160 字なので、上限を超えて読み取りが確認に落ちることは実質無い。
+  上限を超えたら、gh api が現れれば ask、git -C / git grep だけなら素通し
+- 長い文字列の置換は bash の `${s//…}` ではなく sed / tr で行う。bash 3.2 では 17000 字の 1 件で 2 分を超えた
+- graphql の `mutation` 検査は、クォート・エスケープ・行継続を消した文字列でも見る
+  (`query='mutatio'n{x}` を bash は `mutation{x}` として渡す)
+- `-H` / `--header` は `Accept` だけを許す (`_gh_headers_ok`)。`-H "Accept: application/vnd.github.raw"` は
+  ファイル本文の取得で多用する一方、`X-HTTP-Method-Override` / `X-HTTP-Method` のように GET を別メソッドとして
+  扱わせるヘッダがあり、GitHub が解釈するかは確かめていない。名前を列挙して弾かず Accept 以外を認めない
+- 登録は `settings.local/common.json`（対話セッション専用）。base に置くとクラウド routine の gh api の書き込みが確認待ちで止まる
+- 限界: `$'\x67h' api` のような文字コード表記、変数に分けた形 (`G=gh; $G api`)、別コマンドで書いたスクリプトの後日実行、
+  `gh alias set` で作った別名の実行は拾えない。素通しになった分は auto mode なら分類器、それ以外のモードなら通常の確認に回る
+  （gh api は allow に無いので無確認では通らない）
+
+PermissionRequest 側の `if: Bash(gh api *)` の登録は残している。静的 ask が無くなったので通常は発火しないが、
+base は routine も読むので、routine で確認が出る場面ではそちらが答える。
 
 ### 同じ hook を複数の `if` で登録する
 

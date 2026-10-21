@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# PermissionRequest hook helper:
+# PermissionRequest / PreToolUse hook helper:
 # Bash の複合コマンドを &&/||/;/|/改行 で分割し、各セグメントが
 # safe-prefix に該当するときだけ allow を返す。1 つでも該当しない
 # セグメントがあれば `{}` を返して静的ルールに委譲する。
+# PreToolUse で呼ばれたときは、allow にならず gh api が語として現れるコマンドに ask を返す
+# (pretool_decision。静的 ask の `Bash(gh api *)` の代わり)。
 #
 # Why segments instead of prefix-only:
 #   現行フックは「コマンド先頭が gh api か」しか見ていないため、
@@ -340,6 +342,48 @@ has_unsafe_metachar() {
 #   エイリアスやフラグメント経由で mutation を呼ぶ抜け道は GraphQL には無い。
 # 値が読めない形（--input / -F の @file・@-）は「mutation が無い」を証明できないので
 # 一律 unsafe。--method も GraphQL では不要なうえ判定面を増やすだけなので弾く。
+# 純粋変換: gh api のセグメントをトークンに分け、値を取らない短縮フラグの連結をほどく。
+# why: pflag は `-iX DELETE` / `-iXDELETE` / `-iF title=x` / `-iH 'X: y'` を `-i` + `-X ...` 等として
+# 解釈する (gh 2.98 で `gh api zen -iX GET` が通ることを実測)。ほどかずに見ると `-iX` は未知の
+# トークンとして読み飛ばされ、メソッド・フィールド・ヘッダの検査を丸ごとすり抜けて書き込みが allow になる。
+# gh api の値を取らない短縮フラグは `-i` (--include) だけ。cobra の `-h` も念のため同じに扱う
+# (存在しなくても gh がエラーで止まるだけで、ほどいて困ることはない)。
+_gh_tokens() {
+  local t
+  while IFS= read -r t; do
+    while [[ "$t" == -[ih]?* ]]; do
+      printf '%s\n' "-${t:1:1}"
+      t="-${t:2}"
+    done
+    printf '%s\n' "$t"
+  done < <(tokenize_quoted "$1")
+}
+
+# 純粋判定: -H / --header で渡すヘッダがすべて Accept なら 0 (ヘッダ無しも 0)。
+# why Accept だけ: `-H "Accept: application/vnd.github.raw"` はファイルの中身を取る読み取りで多用する。
+# それ以外のヘッダは、gh が GET を送ってもサーバが別メソッドとして扱う実装がある
+# (X-HTTP-Method-Override / X-HTTP-Method 等)。GitHub が解釈するかは確かめていないので、
+# 名前を列挙して弾くのではなく、読み取りと言える Accept 以外を一律で認めない。
+_gh_headers_ok() {
+  local t v pending=0
+  while IFS= read -r t; do
+    if [ "$pending" = 1 ]; then
+      pending=0; v="$t"
+    else
+      case "$t" in
+        -H|--header) pending=1; continue ;;
+        --header=*) v="${t#--header=}" ;;
+        -H*) v="${t#-H}" ;;
+        *) continue ;;
+      esac
+    fi
+    v="${v%%:*}"
+    v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+    case "$v" in [Aa][Cc][Cc][Ee][Pp][Tt]) ;; *) return 1 ;; esac
+  done < <(_gh_tokens "$1")
+  # 値の無い -H (末尾) は gh がエラーにするが、読み取りとは言えないので落とす
+  [ "$pending" = 0 ]
+}
 is_safe_gh_graphql() {
   local seg="$1"
   local t v pending=0
@@ -350,9 +394,16 @@ is_safe_gh_graphql() {
   # ため、mutation 判定はトークン化に依存させない。
   # 大小文字無視で弾くので `__type(name:"Mutation")` のような参照も落ちるが、
   # false positive は ask に落ちるだけで実害が無い。
-  case "$seg" in
+  # クォート・エスケープ・行継続を消した文字列でも見る。bash は `'mutatio'n` / `mutatio\n` /
+  # `'mut''ation'` を 1 語に連結して `mutation` として gh に渡すので、生の文字列だけでは見逃す。
+  # 改行も丸ごと消す (行継続だけでなくクォート内の改行も繋がるが、mutation の検出が増える側にしか倒れない)。
+  # why tr: bash 3.2 の ${s//…} は長い文字列で極端に遅く、PermissionRequest 側には長さの上限が無い。
+  local flat
+  flat="$(printf '%s' "$seg" | LC_ALL=C tr -d "\\\\\\n'\"\`")"
+  case "$seg $flat" in
     *[Mm][Uu][Tt][Aa][Tt][Ii][Oo][Nn]*) return 1 ;;
   esac
+  _gh_headers_ok "$seg" || return 1
 
   while IFS= read -r t; do
     if [ "$pending" = 1 ]; then
@@ -376,7 +427,7 @@ is_safe_gh_graphql() {
       # mutation スキャンも効かず、任意の mutation が allow で通ってしまう。
       -f?*|-F?*)     v="${t#-?}"; v="${v#=}"; _gh_graphql_value_ok "$v" || return 1 ;;
     esac
-  done < <(tokenize_quoted "$seg")
+  done < <(_gh_tokens "$seg")
 
   # 末尾がフラグだけで値が続かない形は解釈できないので unsafe に倒す。
   [ "$pending" = 0 ]
@@ -437,6 +488,7 @@ is_safe_gh_rest() {
   local t fv pending='' saw_method=0 bad_method=0 has_field=0
 
   case "$seg" in *'://'*) return 1 ;; esac
+  _gh_headers_ok "$seg" || return 1
 
   # why トークン化前に改行を弾く: tokenize_quoted は改行を含むトークンでも出力を
   # 改行区切りにするため、クォート内改行を持つ値が呼び出し側の `read -r` で複数
@@ -470,7 +522,7 @@ is_safe_gh_rest() {
       # あればローカルファイルの中身がクエリ文字列に乗って外部へ出てしまう。
       -f?*|-F?*)     has_field=1; fv="${t#-?}"; _gh_graphql_value_ok "${fv#=}" || return 1 ;;
     esac
-  done < <(tokenize_quoted "$seg")
+  done < <(_gh_tokens "$seg")
 
   # 末尾がフラグだけで値が続かない形は解釈できないので unsafe に倒す。
   [ -z "$pending" ] || return 1
@@ -833,8 +885,72 @@ evaluate_command() {
   [ "$has_target" = 1 ]
 }
 
+# gh api / git -C / git grep が語の並びとして現れるか。_normalize_for_mention を通した文字列で見る。
+# why gh を [Gg?*][Hh?*] で拾う: macOS の既定の APFS は大小文字を区別しないので `GH api` で gh が起動する
+# (実測)。`/opt/homebrew/bin/g? api` のように glob で書いた形も同じ gh になる。
+_GH_WORD_RE='[Gg?*][Hh?*]'
+_TARGET_MENTION_RE="(^|[^A-Za-z0-9_.-])(${_GH_WORD_RE}[[:space:]]+api|git[[:space:]]+(-C|grep))([^A-Za-z0-9_-]|\$)"
+_GH_API_MENTION_RE="(^|[^A-Za-z0-9_.-])${_GH_WORD_RE}[[:space:]]+api([^A-Za-z0-9_-]|\$)"
+# PreToolUse で allow の判定 (evaluate_command) に掛けるコマンドの最大文字数。pretool_decision 参照。
+# why bash 3.2 だけ小さく: 1 文字ずつ取り出す処理が bash 3.2 では長さの 2 乗で遅くなり、
+# 7900 字で 32 秒かかった (bash 5.3 は 1 秒)。2000 字なら 1.2 秒で、allow になる gh api の実ログ最長
+# 1160 字も収まる。hook は PATH 上の bash で動くので、どちらの版で起動されても待たせないようにする
+if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then
+  PRETOOL_MAX_CHARS="${PRETOOL_MAX_CHARS:-8000}"
+else
+  PRETOOL_MAX_CHARS="${PRETOOL_MAX_CHARS:-2000}"
+fi
+
+# 純粋変換: 「gh api が現れるか」の検出用に、bash が語を組み立て直す記号を消す。
+# why: bash は `"gh" api` / `g\h api` / `{gh,} api` / `gh {api,}` / `gh${IFS}api` / `/bin/g[h] api` /
+# `$(which gh) api` / `gh \<改行>api` を gh api として実行する。クォート・エスケープ・ブレース・
+# 角括弧・括弧・カンマ・`$` を消し、`${IFS}` と行継続を空白に置き換えれば同じ語の並びが現れる。
+# 消しすぎて無関係な語が繋がっても、gh api の言及ありと判定されて ask 側に倒れるだけ。
+# 限界: `$'\x67h' api` のように文字コードで書いた形は現れない。
+# 記号を消すだけだと `system("gh api")` が `systemgh api` に繋がって語境界を失うので、
+# 記号を空白に置き換えた版も並べて出す (呼び出し側はどちらかに一致すれば言及ありとみなす)。
+# why sed / tr: bash 3.2 (macOS の /bin/bash) の ${s//pat/rep} は長い文字列や日本語を含む文字列で
+# 極端に遅く、17000 字のコマンド 1 件で 2 分を超えた。全 Bash 呼び出しで走るので外部コマンドに任せる。
+# 行末の `\` (行継続) は改行の手前で空白に置き換える (改行自体は空白として正規表現に一致する)。
+_normalize_for_mention() {
+  local s
+  s="$(printf '%s' "$1" | LC_ALL=C sed -e 's/\\$/ /' -e 's/\${IFS}/ /g' -e 's/\$IFS/ /g' | LC_ALL=C tr -d '\\')"
+  printf '%s' "$s" | LC_ALL=C tr -d "'\"\`{}[],\$()"
+  printf '\n'
+  printf '%s' "$s" | LC_ALL=C tr "'\"\`{}[],\$()" '            '
+}
+
+# 純粋判定: PreToolUse としての判定を allow / ask / pass の 1 語で出力する。
+# why PreToolUse でも判定する: PermissionRequest の allow は、確認ダイアログと並行して走る
+# hook の結果として届く。cmux の feed hook のように応答を待つ PermissionRequest hook が
+# 同居すると、Claude Code は全 hook の結果が揃うまで決定を受け取れず、先にダイアログで
+# 決着してしまう。PreToolUse の allow は確認の手前で効くので、その競合が起きない。
+# why gh api が現れたら allow 以外は ask: 静的 ask の `Bash(gh api *)` は PreToolUse の allow より
+# 強く、残すと読み取りも確認に落ちる。外した代わりに書き込みの確認をここが担う。
+# 「実行しない形 (heredoc の本文・コメント・grep のパターン)」を見分けて素通しする方式は、
+# bash の構文 (heredoc・コメント・行をまたぐクォート) の読み違いがそのまま書き込みの素通りに
+# なった (コードレビューで実測)。読み違えても ask 側に倒れるよう、語として現れたら確認に回す。
+pretool_decision() {
+  local cmd="$1" norm
+  norm="$(_normalize_for_mention "$cmd")"
+  # 全 Bash 呼び出しで起動するので、対象の語が無ければトークン化せずに抜ける
+  [[ "$norm" =~ $_TARGET_MENTION_RE ]] || { echo pass; return; }
+  # evaluate_command は 1 文字ずつ回すので長さに対して急に遅くなる (8000 字で約 1 秒、
+  # 25000 字で 6〜15 秒)。allow になる gh api は実ログで最長 1160 字なので、上限を超えたら解析しない
+  if [ "${#cmd}" -le "$PRETOOL_MAX_CHARS" ] && evaluate_command "$cmd"; then
+    echo allow; return
+  fi
+  [[ "$norm" =~ $_GH_API_MENTION_RE ]] && { echo ask; return; }
+  echo pass
+}
+
 emit_allow() {
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","message":"compound read-only: gh api (no write flags; graphql without mutation) / git -C <path> <allowlisted subcommand> / git grep (no pager-exec flags) + segments in safe-prefix list"}}}'
+}
+
+emit_pretool() {
+  jq -cn --arg d "$1" --arg r "$2" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:$d,permissionDecisionReason:$r}}'
 }
 
 emit_passthrough() {
@@ -842,10 +958,26 @@ emit_passthrough() {
 }
 
 main() {
-  local cmd
+  local out event tool cmd
   # 不正 JSON / command 欠落では判定せず静的ルールに委ねる（set -e で落とさない）。
-  cmd="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { emit_passthrough; return; }
+  # why jq を 1 回にまとめる: PreToolUse では全 Bash 呼び出しで起動するので、起動回数がそのまま遅延になる
+  # 末尾の "." は番兵。$(...) が末尾の改行を削ると、command が空のとき行数が崩れて
+  # event / tool の値が command にずれるので、必ず 3 行目が存在する形にする
+  out="$(jq -r '(.hook_event_name // "" | tostring), (.tool_name // "" | tostring), ((.tool_input.command // "" | tostring) + ".")' 2>/dev/null)" \
+    || { emit_passthrough; return; }
+  event="${out%%$'\n'*}"; out="${out#*$'\n'}"
+  tool="${out%%$'\n'*}"; cmd="${out#*$'\n'}"; cmd="${cmd%.}"
   [ -z "$cmd" ] && { emit_passthrough; return; }
+  if [ "$event" = 'PreToolUse' ]; then
+    # matcher を外れた呼び出しでも誤判定しないよう tool_name も確かめる
+    [ "$tool" = 'Bash' ] || { emit_passthrough; return; }
+    case "$(pretool_decision "$cmd")" in
+      allow) emit_pretool allow 'read-only: gh api (no write flags; graphql without mutation) / git -C <path> <allowlisted subcommand> / git grep (no pager-exec flags) + segments in safe-prefix list' ;;
+      ask) emit_pretool ask 'gh api の書き込み、または読み取りに限ると判定できない gh api の呼び出しです' ;;
+      *) emit_passthrough ;;
+    esac
+    return
+  fi
   if evaluate_command "$cmd"; then
     emit_allow
   else
@@ -1280,6 +1412,105 @@ GET'"
   # 逆に、リテラル化された 1 文字そのものは制御演算子ではないので allow のままでよい。
   assert_safe   'エスケープされた空白はセグメントを割らない' 'git -C /re\ po status'
   assert_safe   'エスケープされた ; は区切りではない'        $'gh api repos/foo/bar/pulls/1\necho a\\;b'
+
+  # ---- PreToolUse の判定 (pretool_decision) ----
+  assert_pretool() {
+    local label="$1" want="$2" cmd="$3" got
+    got="$(pretool_decision "$cmd")"
+    if [ "$got" = "$want" ]; then
+      printf 'ok  : pretool %s\n' "$label"
+    else
+      printf 'FAIL: pretool %s  -- expected %s, got %s\n' "$label" "$want" "$got"
+      fail=1
+    fi
+  }
+  # 読み取りは allow (静的 ask を外したので、確認の手前で通す)
+  assert_pretool '読み取り' allow 'gh api repos/foo/bar/pulls/1 --jq .title'
+  assert_pretool 'graphql 参照' allow "gh api graphql -f query='{ viewer { login } }'"
+  assert_pretool 'Accept ヘッダ' allow 'gh api repos/foo/bar/readme -H "Accept: application/vnd.github.raw"'
+  assert_pretool 'Accept ヘッダ (--header=)' allow "gh api repos/foo/bar/readme --header='accept: application/vnd.github.raw'"
+  assert_pretool 'git -C 読み取り' allow 'git -C /repo log --oneline -5'
+  assert_pretool 'git grep' allow 'git grep -n foo'
+  # gh api が現れて allow でないものは、形を問わず ask
+  assert_pretool 'DELETE' ask 'gh api -X DELETE repos/foo/bar/git/refs/heads/x'
+  assert_pretool 'POST (パラメータ付き)' ask 'gh api repos/foo/bar/issues -f title=x'
+  assert_pretool 'graphql mutation' ask "gh api graphql -f query='mutation { x }'"
+  assert_pretool 'mutation をクォート分割' ask "gh api graphql -f query='mutatio'n{x}"
+  assert_pretool 'mutation を \\ で分割' ask 'gh api graphql -f query=mutatio\n{x}'
+  assert_pretool 'mutation を 2 つのクォートに分割' ask "gh api graphql -F query='mut''ation{ x }'"
+  assert_pretool 'X-HTTP-Method-Override' ask "gh api repos/a/b -H 'X-HTTP-Method-Override: DELETE'"
+  assert_pretool 'X-HTTP-Method' ask "gh api repos/a/b -H 'X-HTTP-Method: DELETE'"
+  assert_pretool 'Accept と別ヘッダの併用' ask "gh api repos/a/b -H 'Accept: x' --header 'X-Foo: y'"
+  # -i (値を取らない) に連結した短縮フラグは pflag がほどいて解釈する
+  assert_pretool '-i 単独' allow 'gh api repos/a/b -i'
+  assert_pretool '-iH Accept' allow "gh api repos/a/b -iH 'Accept: application/vnd.github.raw'"
+  assert_pretool '-iX DELETE' ask 'gh api repos/a/b -iX DELETE'
+  assert_pretool '-iXDELETE' ask 'gh api repos/a/b -iXDELETE'
+  assert_pretool '-iiX DELETE' ask 'gh api repos/a/b -iiX DELETE'
+  assert_pretool '-iF (POST)' ask 'gh api repos/a/b/issues -iF title=x'
+  assert_pretool '-if (POST)' ask 'gh api repos/a/b/issues -if title=x'
+  assert_pretool '-iH 別ヘッダ' ask "gh api repos/a/b -iH 'X-HTTP-Method-Override: DELETE'"
+  assert_pretool 'graphql -iF @file' ask 'gh api graphql -iF query=@/tmp/q'
+  assert_pretool 'graphql -iX' ask "gh api graphql -iX POST -f query='{ viewer { login } }'"
+  assert_pretool 'graphql mutation を \<改行> で分割 (安全側に ask)' ask $'gh api graphql -f query=\'mutatio\\\nn{x}\''
+  assert_pretool '未知コマンドと連結' ask 'gh api repos/foo/bar | python3 -c "print(1)"'
+  assert_pretool 'env 前置き' ask 'env gh api -X DELETE repos/foo/bar'
+  assert_pretool 'env -S' ask "env -S 'gh api -X DELETE repos/a/b --jq' echo"
+  assert_pretool 'stdbuf 前置き' ask 'stdbuf -o0 gh api -X DELETE repos/a/b'
+  assert_pretool 'case 文の中' ask 'case x in x) gh api -X DELETE repos/a/b;; esac'
+  assert_pretool 'プロセス置換' ask 'cat <(gh api -X DELETE repos/a/b)'
+  assert_pretool 'awk system' ask "awk 'BEGIN{system(\"gh api -X DELETE repos/a/b\")}'"
+  assert_pretool 'git alias' ask 'git -c alias.z="!gh api -X DELETE repos/a/b" z'
+  assert_pretool 'bash -c' ask "bash -c 'gh api -X DELETE repos/foo/bar'"
+  assert_pretool 'コマンド置換' ask 'echo $(gh api -X DELETE repos/foo/bar)'
+  assert_pretool 'シェル関数の本体' ask $'g(){ gh api "repos/$1" --jq .x; }\ng foo/bar'
+  assert_pretool '変数に入れて実行' ask $'X=\'gh api -X DELETE repos/a/b\'; $X'
+  assert_pretool 'スクリプトに書いて実行' ask $'echo "gh api -X DELETE repos/o/r" > /tmp/x; chmod +x /tmp/x; /tmp/x'
+  # heredoc・コメント・クォートの読み違いがあっても ask に倒れる
+  assert_pretool 'コメント中の <<' ask $'echo hi # <<EOF\ngh api -X DELETE repos/o/r'
+  assert_pretool "コメント中の '" ask $'echo hi # it\'s\ngh api -X DELETE repos/o/r'
+  assert_pretool 'クォート内の <<X' ask $'echo "<<X"\ngh api -X DELETE repos/a/b'
+  assert_pretool '区切り語に記号' ask $'cat > /tmp/x <<\'E:F\'\nhi\nE:F\ngh api -X DELETE repos/o/r'
+  # 字面に gh api が並ばない形 (bash が組み立て直す)
+  assert_pretool 'ブレースで gh' ask '{gh,} api -X DELETE repos/a/b'
+  assert_pretool 'ブレースで api' ask 'gh {api,} -X DELETE repos/a/b'
+  assert_pretool '${IFS}' ask 'gh${IFS}api -X DELETE repos/a/b'
+  assert_pretool "\$'gh'" ask "\$'gh' api -X DELETE repos/a/b"
+  assert_pretool 'which で gh' ask '$(which gh) api -X DELETE repos/a/b'
+  assert_pretool 'glob で gh' ask '/opt/homebrew/bin/g[h] api -X DELETE repos/a/b'
+  assert_pretool '行継続で分断' ask $'gh \\\napi -X DELETE repos/a/b'
+  assert_pretool '大文字の GH (macOS は大小文字を区別しない)' ask 'GH api -X DELETE repos/a/b'
+  assert_pretool 'glob ? で gh' ask '/opt/homebrew/bin/g? api -X DELETE repos/a/b'
+  assert_pretool 'glob * で gh' ask '/opt/homebrew/bin/g* api -X DELETE repos/a/b'
+  # 文字列として書いただけでも ask (実行しない形を見分けない。安全側の誤検知として許容)
+  assert_pretool 'grep パターン' ask 'grep -rn "gh api" .'
+  assert_pretool 'heredoc の本文' ask $'cat > /tmp/x.md <<\'EOF\'\ngh api -X DELETE repos/foo/bar\nEOF'
+  # 上限を超える長さは解析しない。gh api があれば ask、git -C / git grep だけなら素通し
+  local long; long="$(printf '%*s' 9000 '' | tr ' ' x)"
+  assert_pretool '長大 (読み取りでも)' ask "gh api repos/a/b --jq '.${long}'"
+  assert_pretool '長大 (git -C だけ)' pass "git -C /repo log --grep='${long}'"
+  # gh api が現れないものは素通し (静的ルール / 分類器に任せる)
+  assert_pretool '無関係' pass 'ls -la'
+  assert_pretool 'gh pr view' pass 'gh pr view 1'
+  assert_pretool 'git -C の書き込み系は判定しない' pass 'git -C /repo push'
+
+  # main の入力の読み取り (jq 1 回で event / tool / command を取り出す)
+  assert_main() {
+    local label="$1" want="$2" json="$3" got
+    got="$(printf '%s' "$json" | main | jq -r '.hookSpecificOutput.permissionDecision // .hookSpecificOutput.decision.behavior // "pass"')"
+    if [ "$got" = "$want" ]; then
+      printf 'ok  : main %s\n' "$label"
+    else
+      printf 'FAIL: main %s  -- expected %s, got %s\n' "$label" "$want" "$got"
+      fail=1
+    fi
+  }
+  assert_main 'PreToolUse 読み取り' allow '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"gh api repos/a/b"}}'
+  assert_main 'PreToolUse 書き込み' ask '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"gh api -X DELETE repos/a/b"}}'
+  assert_main 'PermissionRequest 読み取り' allow '{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"gh api repos/a/b"}}'
+  assert_main 'Bash 以外' pass '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"command":"gh api -X DELETE repos/a/b"}}'
+  assert_main 'command 欠落' pass '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{}}'
+  assert_main '不正 JSON' pass 'not json'
 
   if [ "$fail" = 0 ]; then
     printf '\nall tests passed.\n'

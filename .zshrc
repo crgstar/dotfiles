@@ -1,4 +1,6 @@
 eval "$(/opt/homebrew/bin/brew shellenv)"
+# why: brew の curl は keg-only でリンクされず、素の curl は macOS 同梱の古い版になる。CVE 修正の速い brew 版を優先する
+export PATH="/opt/homebrew/opt/curl/bin:$PATH"
 eval "$(mise activate zsh)"
 export PATH="$HOME/.local/bin:$PATH"
 

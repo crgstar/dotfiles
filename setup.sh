@@ -600,6 +600,10 @@ target_skills() {
             "$HOME/.claude/skills/explain/assets/template.html"
   link_file "$DOTFILES_DIR/.claude/skills-global/write-shared-docs/SKILL.md" \
             "$HOME/.claude/skills/write-shared-docs/SKILL.md"
+  # why: 手元 Mac の保守系は本来 dotfiles 専用だが、辞書登録はどのリポで作業中でも
+  #      手で呼びたい。disable-model-invocation で自動発火しないので全リポに配っても誤発火しない。
+  link_file "$DOTFILES_DIR/.claude/skills-global/register-meltype-dict/SKILL.md" \
+            "$HOME/.claude/skills/register-meltype-dict/SKILL.md"
   # why: unslop は日本語向けの翻案で、英語の文章は原典 reference-en.md に送り返す。
   #      SKILL.md 単体を配ると英語側の行き先が解決できず、判定が宙に浮く。
   link_file "$DOTFILES_DIR/.claude/skills-global/unslop/SKILL.md" \

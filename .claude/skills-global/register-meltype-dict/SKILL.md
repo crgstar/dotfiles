@@ -7,6 +7,7 @@ description: >-
   対象外: Meltype の更新・インストール (meltype-update の領分)、Windows 版、macOS 標準のユーザ辞書の編集。
 argument-hint: "[読み] [単語]"
 arguments: [yomi, word]
+disable-model-invocation: true
 ---
 
 # Meltype 辞書登録
@@ -15,14 +16,23 @@ Mac 版に登録画面は無い。仕様の正本は `yksr-melt/Meltype` の `ma
 
 1. 読み `$yomi`・単語 `$word` が空や曖昧ならユーザに確かめる。読みはひらがなに揃える
 2. 同じ読みが既にあれば止まり、上書きか追加かを確かめる (同じ読みが並ぶと順位が読めなくなるため)
-3. 追記して、区切りがタブ 1 つかを確かめる
+3. 追記して、どの行も先頭の数 (列数) が 2 か確かめる (2 以外は区切りがタブ 1 つになっていない)
 
 ```bash
 F="$HOME/Library/Application Support/Meltype/userdict.txt"
 [ -d "$(dirname "$F")" ] || { echo "Meltype 未インストール"; exit 1; }
 grep -n "^$yomi	" "$F" 2>/dev/null && { echo "既存の読みあり"; exit 1; }
 printf '%s\t%s\n' '$yomi' '$word' >> "$F"
-cat -t "$F" | tail -n 3
+awk -F'\t' '{print NF": "$0}' "$F" | tail -n 3
+```
+
+手順 2 で上書きと決まったら、同じ読みの行を消してから追記する。追加と決まったら、上の grep の行を飛ばして追記する。
+
+```bash
+F="$HOME/Library/Application Support/Meltype/userdict.txt"
+grep -v "^$yomi	" "$F" > "$F.tmp"; mv "$F.tmp" "$F"
+printf '%s\t%s\n' '$yomi' '$word' >> "$F"
+awk -F'\t' '{print NF": "$0}' "$F" | tail -n 3
 ```
 
 4. 反映は `pkill -x Meltype` のあと、ユーザに入力ソースを選び直してもらう (Claude からは切り替えられない)

@@ -2,10 +2,10 @@
 #      読まれても bind 等が警告を出さないようにする（素の bash -c はそもそも .bashrc を読まない）
 [[ $- == *i* ]] || return
 
-eval "$(/opt/homebrew/bin/brew shellenv)"
+[ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
 # why: brew の curl は keg-only でリンクされず、素の curl は macOS 同梱の古い版になる。CVE 修正の速い brew 版を優先する
-export PATH="/opt/homebrew/opt/curl/bin:$PATH"
-eval "$(mise activate bash)"
+[ -d /opt/homebrew/opt/curl/bin ] && export PATH="/opt/homebrew/opt/curl/bin:$PATH"
+command -v mise >/dev/null && eval "$(mise activate bash)"
 export PATH="$HOME/.local/bin:$PATH"
 
 # bun
@@ -37,7 +37,7 @@ shopt -s histappend
 
 # bat
 # why: man を色付きで読みたい。bat 側でパイプ時は自動でプレーンになる
-export MANPAGER="sh -c 'col -bx | bat -l man -p'"
+command -v bat >/dev/null && export MANPAGER="sh -c 'col -bx | bat -l man -p'"
 export BAT_THEME="TwoDark"
 
 # fzf
@@ -51,14 +51,14 @@ export FZF_ALT_C_OPTS="--preview 'eza --tree --level=2 --color=always {} 2>/dev/
 # why: ? で長い履歴コマンドの全文をトグル表示
 export FZF_CTRL_R_OPTS="--preview 'echo {}' --preview-window=down:3:hidden:wrap --bind='?:toggle-preview'"
 # why: fzf 0.48+ の bash 統合。Ctrl-T / Ctrl-R / Alt-C を有効化
-eval "$(fzf --bash)"
+command -v fzf >/dev/null && eval "$(fzf --bash)"
 
 # zoxide
 # why: z 移動時に行き先を表示してマッチ違いに即気づけるようにする
 export _ZO_ECHO=1
 export _ZO_MAXAGE=10000
 export _ZO_FZF_OPTS="$FZF_DEFAULT_OPTS --no-sort --keep-right"
-eval "$(zoxide init bash)"
+command -v zoxide >/dev/null && eval "$(zoxide init bash)"
 
 # completion
 bind 'set completion-ignore-case on'   # 大小文字無視

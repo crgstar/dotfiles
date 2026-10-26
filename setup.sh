@@ -23,6 +23,10 @@ TARGETS=(
   "mcp:mcp/ 配下のヘルパーをリンクし、settings.local/<env>.json の mcpServers を ~/.claude.json へマージ"
 )
 
+# why: launchd (~/Library/LaunchAgents) 前提で Linux では動かないターゲット。
+#      TARGETS に launchd 前提のものを足したら、ここにも足すこと (足し忘れると Linux で launchctl が失敗する)。
+MACOS_ONLY_TARGETS=" reflect cmux-pill "
+
 usage() {
   cat <<'EOF'
 使い方: ./setup.sh [env] [オプション]
@@ -122,7 +126,15 @@ if [ -n "$ONLY_TARGETS" ]; then
   done
 fi
 
+# why: Linux では --only 未指定 (全実行) のとき MACOS_ONLY_TARGETS を自動で外す。明示指定は尊重する。
+if [ "$(uname -s)" = "Darwin" ]; then IS_MACOS=1; else IS_MACOS=0; fi
+
 target_enabled() {
+  if [ -z "$ONLY_TARGETS" ] && [ "$IS_MACOS" = 0 ]; then
+    case "$MACOS_ONLY_TARGETS" in
+      *" $1 "*) echo "スキップ: $1 は macOS 専用です (Linux)"; return 1 ;;
+    esac
+  fi
   [ -z "$ONLY_TARGETS" ] && return 0
   case ",$ONLY_TARGETS," in
     *",$1,"*) return 0 ;;

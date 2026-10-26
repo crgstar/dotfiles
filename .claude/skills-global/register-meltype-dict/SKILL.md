@@ -23,7 +23,7 @@ F="$HOME/Library/Application Support/Meltype/userdict.txt"
 [ -d "$(dirname "$F")" ] || { echo "Meltype 未インストール"; exit 1; }
 grep -n "^$yomi	" "$F" 2>/dev/null && { echo "既存の読みあり"; exit 1; }
 printf '%s\t%s\n' '$yomi' '$word' >> "$F"
-awk -F'\t' '{print NF": "$0}' "$F" | tail -n 3
+awk -F'\t' '{print NF": "$(0)}' "$F" | tail -n 3
 ```
 
 手順 2 で上書きと決まったら、同じ読みの行を消してから追記する。追加と決まったら、上の grep の行を飛ばして追記する。
@@ -32,7 +32,7 @@ awk -F'\t' '{print NF": "$0}' "$F" | tail -n 3
 F="$HOME/Library/Application Support/Meltype/userdict.txt"
 grep -v "^$yomi	" "$F" > "$F.tmp"; mv "$F.tmp" "$F"
 printf '%s\t%s\n' '$yomi' '$word' >> "$F"
-awk -F'\t' '{print NF": "$0}' "$F" | tail -n 3
+awk -F'\t' '{print NF": "$(0)}' "$F" | tail -n 3
 ```
 
 4. 反映は `pkill -x Meltype` のあと、ユーザに入力ソースを選び直してもらう (Claude からは切り替えられない)

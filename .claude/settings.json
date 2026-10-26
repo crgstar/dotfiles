@@ -289,6 +289,7 @@
   },
   "autoMemoryEnabled": true,
   "skipWorkflowUsageWarning": true,
+  "promptCacheTtl": "1h",
   "env": {
     "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
     "GIT_CONFIG_COUNT": "1",

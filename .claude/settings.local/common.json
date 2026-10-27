@@ -75,5 +75,16 @@
   },
   "env": {
     "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1"
+  },
+  "enabledPlugins": {
+    "pstack@cursor-plugins": true
+  },
+  "extraKnownMarketplaces": {
+    "cursor-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "cursor/plugins"
+      }
+    }
   }
 }

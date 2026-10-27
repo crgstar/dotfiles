@@ -781,8 +781,8 @@ target_hooks() {
 }
 
 target_statusline() {
-  link_file "$DOTFILES_DIR/.claude/statusline/statusline.sh" \
-    "$HOME/.claude/statusline.sh"
+  link_file "$DOTFILES_DIR/.claude/statusline/ccstatusline-wrapper.sh" \
+    "$HOME/.claude/ccstatusline-wrapper.sh"
   link_file "$DOTFILES_DIR/.claude/statusline/runcat-statusline.py" \
     "$HOME/.claude/runcat-statusline.py"
   link_file "$DOTFILES_DIR/.claude/statusline/cache-gauge.sh" \

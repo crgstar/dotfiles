@@ -16,7 +16,7 @@ TARGETS=(
   "claude-md:CLAUDE.md を base+env でマージし、FABLE.md と併せてリンク"
   "skills:スキル・サブエージェント定義のリンク (第三者リポの clone を含む)"
   "hooks:permission 系 hook スクリプトのリンク"
-  "statusline:statusLine ラッパ・RunCat Neo 用スナップショット生成・キャッシュ寿命ゲージのリンク"
+  "statusline:statusLine ラッパ・ccstatusline の表示設定・RunCat Neo 用スナップショット生成・キャッシュ寿命ゲージのリンク"
   "reflect:reflect 無人実行 (SessionEnd hook + launchd 夜間ドライバ)"
   "cmux-pill:cmux のサイドバーピル塗り替え常駐 (launchd)"
   "prefixes:segment-allow.prefixes を permissions.allow から再生成 (claude-settings の後)"
@@ -783,6 +783,12 @@ target_hooks() {
 target_statusline() {
   link_file "$DOTFILES_DIR/.claude/statusline/ccstatusline-wrapper.sh" \
     "$HOME/.claude/ccstatusline-wrapper.sh"
+  # why リンクで置ける: ccstatusline は保存時にリンクを辿り、リンク先を一時ファイルの rename で
+  #      置き換える (リンク自体は残る)。設定画面での変更はそのまま dotfiles 側の差分になる。
+  #      ccstatusline の版上げで設定の形式 (version) が上がると、次の描画で移行結果を書き戻すので
+  #      操作していなくても差分が出る
+  link_file "$DOTFILES_DIR/.claude/statusline/ccstatusline-settings.json" \
+    "$HOME/.config/ccstatusline/settings.json"
   link_file "$DOTFILES_DIR/.claude/statusline/runcat-statusline.py" \
     "$HOME/.claude/runcat-statusline.py"
   link_file "$DOTFILES_DIR/.claude/statusline/cache-gauge.sh" \

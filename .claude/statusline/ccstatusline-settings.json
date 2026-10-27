@@ -1,0 +1,272 @@
+{
+  "version": 4,
+  "lines": [
+    [
+      {
+        "id": "1",
+        "type": "custom-command",
+        "color": "white",
+        "rawValue": true,
+        "commandPath": "basename \"$PWD\""
+      },
+      {
+        "id": "be444381-6e5e-46a6-85b3-bef01a640b5f",
+        "type": "separator"
+      },
+      {
+        "id": "96705dbe-2f92-4786-aa8e-9a20e7ec4284",
+        "type": "model",
+        "rawValue": true
+      },
+      {
+        "id": "c3fa5565-9225-47f2-b276-e1576189cf5a",
+        "type": "separator"
+      },
+      {
+        "id": "e7989d48-f357-4947-b670-9ed129a8a5b5",
+        "type": "thinking-effort",
+        "color": "cyan",
+        "rawValue": true
+      },
+      {
+        "id": "2",
+        "type": "separator"
+      },
+      {
+        "id": "3",
+        "type": "context-length",
+        "color": "brightYellow",
+        "rawValue": false
+      },
+      {
+        "id": "4",
+        "type": "separator"
+      },
+      {
+        "id": "86f8ab06-77b3-461c-a9e9-a1f27cb2329f",
+        "type": "context-percentage-usable",
+        "color": "brightYellow",
+        "rawValue": false,
+        "metadata": {
+          "inverse": "false"
+        }
+      },
+      {
+        "id": "1ae16efa-9d42-4366-8a7b-65971fdaa6e1",
+        "type": "separator"
+      },
+      {
+        "id": "f8f31d62-f2b4-4ea9-8305-c22ca3792aec",
+        "type": "free-memory",
+        "rawValue": true
+      },
+      {
+        "id": "c1be6e7c-c137-49f8-ba44-ef4b94f7212d",
+        "type": "separator"
+      },
+      {
+        "id": "5",
+        "type": "git-branch",
+        "color": "brightCyan"
+      },
+      {
+        "id": "52e29343-a3ad-4d7e-9c70-68d54b11bec4",
+        "type": "separator"
+      },
+      {
+        "id": "5151b951-7d05-4960-b53f-6a559b9c7b9b",
+        "type": "git-worktree",
+        "color": "brightCyan"
+      },
+      {
+        "id": "e3377ef7-9353-4888-8c33-6a07a7500769",
+        "type": "separator"
+      },
+      {
+        "id": "41f6797d-3408-4f57-8089-dac04df146c5",
+        "type": "git-changes"
+      },
+      {
+        "id": "449a0dac-675f-4c4a-a4aa-c6e35f963b3a",
+        "type": "separator"
+      },
+      {
+        "id": "9422a360-c811-4996-b7df-d2f1a28855a5",
+        "type": "git-clean-status"
+      }
+    ],
+    [
+      {
+        "id": "376bfd2f-5bbd-48d3-aabe-f170444d31ee",
+        "type": "session-name",
+        "color": "brightCyan",
+        "rawValue": true
+      },
+      {
+        "id": "59c12e0c-ad8f-46eb-b4ec-9d221c6c8bf6",
+        "type": "separator",
+        "character": "|"
+      },
+      {
+        "id": "06aabf25-260b-4959-b283-f04d125b0804",
+        "type": "skills",
+        "color": "brightBlue",
+        "rawValue": false,
+        "metadata": {
+          "mode": "count"
+        }
+      },
+      {
+        "id": "22de865b-ea34-45ae-978b-9609c13876a8",
+        "type": "custom-text",
+        "color": "brightBlue",
+        "customText": ": "
+      },
+      {
+        "id": "b247081a-f2e2-41fa-9520-519ebf330058",
+        "type": "skills",
+        "color": "brightBlue",
+        "rawValue": true,
+        "metadata": {
+          "mode": "list",
+          "hide": "empty"
+        }
+      },
+      {
+        "id": "e2fa5cb2-a630-4040-8365-7800c01eed67",
+        "type": "separator",
+        "character": " "
+      },
+      {
+        "id": "a0e4bad6-db16-4af1-aba8-8ed75bdc82c8",
+        "type": "skills",
+        "color": "white",
+        "rawValue": true,
+        "metadata": {
+          "mode": "current",
+          "hide": "empty"
+        }
+      },
+      {
+        "id": "17fd448d-e932-4b51-bb36-a9d0f5b71800",
+        "type": "separator"
+      },
+      {
+        "id": "d239a8ac-ad86-4c6a-a5df-4e84dcebde9f",
+        "type": "tokens-input",
+        "color": "brightGreen"
+      },
+      {
+        "id": "0641dc4c-60dc-4bfc-90ea-d7a5d43c292e",
+        "type": "separator"
+      },
+      {
+        "id": "7e5217fb-ffa3-4425-b58b-f47e35d64095",
+        "type": "tokens-output",
+        "color": "brightGreen"
+      },
+      {
+        "id": "cfb415a2-42bd-4d4a-bdec-438756b5a276",
+        "type": "separator"
+      },
+      {
+        "id": "265654bc-ebbe-4a0e-8325-8fa3b69a8ffd",
+        "type": "tokens-total",
+        "color": "brightGreen"
+      },
+      {
+        "id": "d1bcd021-afb4-4fc7-ae2f-1f2466c34394",
+        "type": "separator"
+      },
+      {
+        "id": "b1d095b2-b323-46b8-a99b-7b366baa3aee",
+        "type": "version"
+      },
+      {
+        "id": "9a89f086-a669-4869-a0e8-4340e7906ea0",
+        "type": "separator"
+      }
+    ],
+    [
+      {
+        "id": "37036810-e11c-484e-978b-b89a5425a152",
+        "type": "session-usage",
+        "color": "yellow",
+        "rawValue": false,
+        "metadata": {
+          "display": "slider"
+        }
+      },
+      {
+        "id": "cf466cac-44f4-41de-8cdb-6396925c3744",
+        "type": "separator"
+      },
+      {
+        "id": "7762b8a9-edf8-48c9-ac77-d72d3d00b390",
+        "type": "reset-timer",
+        "color": "yellow",
+        "rawValue": true,
+        "metadata": {
+          "display": "time"
+        }
+      },
+      {
+        "id": "d118fb2a-52fb-4554-a732-0e1c4f5e1acb",
+        "type": "separator"
+      },
+      {
+        "id": "6bce9b9d-7f06-4aa4-8586-ac4d57651469",
+        "type": "weekly-usage",
+        "color": "brightCyan",
+        "metadata": {
+          "display": "slider"
+        }
+      },
+      {
+        "id": "792ed925-3e84-49a7-bb12-db9c0b9f098e",
+        "type": "separator"
+      },
+      {
+        "id": "42ffe05c-7f99-4a7b-905c-f235019fd833",
+        "type": "weekly-reset-timer",
+        "color": "brightCyan",
+        "metadata": {
+          "display": "time"
+        },
+        "rawValue": true
+      },
+      {
+        "id": "2b838ce8-b7b3-4996-8aea-f6808cd6ee68",
+        "type": "separator"
+      },
+      {
+        "id": "ee29c3b0-4455-4214-bf4a-d28bc3408fd2",
+        "type": "custom-command",
+        "color": "white",
+        "rawValue": true,
+        "commandPath": "~/.claude/cache-gauge.sh",
+        "preserveColors": true
+      }
+    ]
+  ],
+  "flexMode": "full-minus-40",
+  "compactThreshold": 60,
+  "colorLevel": 2,
+  "inheritSeparatorColors": true,
+  "globalBold": false,
+  "gitCacheTtlSeconds": 5,
+  "minimalistMode": false,
+  "powerline": {
+    "enabled": false,
+    "separators": [
+      ""
+    ],
+    "separatorInvertBackground": [
+      false
+    ],
+    "startCaps": [],
+    "endCaps": [],
+    "autoAlign": false,
+    "continueThemeAcrossLines": false
+  }
+}

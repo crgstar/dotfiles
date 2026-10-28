@@ -3,6 +3,16 @@
   "lines": [
     [
       {
+        "id": "host",
+        "type": "custom-command",
+        "color": "brightMagenta",
+        "commandPath": "uname -n | cut -d. -f1 | grep -v MacBook || true"
+      },
+      {
+        "id": "host-sep",
+        "type": "separator"
+      },
+      {
         "id": "1",
         "type": "custom-command",
         "color": "white",

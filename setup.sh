@@ -610,8 +610,8 @@ target_skills() {
             "$HOME/.claude/skills/explain/SKILL.md"
   link_file "$DOTFILES_DIR/.claude/skills-global/explain/assets/template.html" \
             "$HOME/.claude/skills/explain/assets/template.html"
-  link_file "$DOTFILES_DIR/.claude/skills-global/write-shared-docs/SKILL.md" \
-            "$HOME/.claude/skills/write-shared-docs/SKILL.md"
+  link_file "$DOTFILES_DIR/.claude/skills-global/shared-tech-docs/SKILL.md" \
+            "$HOME/.claude/skills/shared-tech-docs/SKILL.md"
   # why: 手元 Mac の保守系は本来 dotfiles 専用だが、辞書登録はどのリポで作業中でも
   #      手で呼びたい。disable-model-invocation で自動発火しないので全リポに配っても誤発火しない。
   link_file "$DOTFILES_DIR/.claude/skills-global/register-meltype-dict/SKILL.md" \

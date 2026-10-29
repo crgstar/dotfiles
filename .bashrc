@@ -3,6 +3,9 @@
 [[ $- == *i* ]] || return
 
 [ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
+# why: Nix (Home Manager) で入れた CLI を Homebrew 版より優先する。brew shellenv が /opt/homebrew/bin を
+#   先頭に足すので、その後で足す
+[ -d "$HOME/.nix-profile/bin" ] && export PATH="$HOME/.nix-profile/bin:$PATH"
 # why: brew の curl は keg-only でリンクされず、素の curl は macOS 同梱の古い版になる。CVE 修正の速い brew 版を優先する
 [ -d /opt/homebrew/opt/curl/bin ] && export PATH="/opt/homebrew/opt/curl/bin:$PATH"
 command -v mise >/dev/null && eval "$(mise activate bash)"

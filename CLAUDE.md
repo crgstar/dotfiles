@@ -58,6 +58,15 @@ setup.sh は環境 (`home`/`work`) を指定すると、以下の設定をそれ
 - `.zshrc` の末尾で `~/.zshrc.local` を source する構成
 - bash 用に `.bashrc` / `bashrc.local/<env>.bash`（`~/.bashrc.local` へリンク）が同じ構成で並び、`.bash_profile` は `.bashrc` を読むだけ。zsh 側の設定を変えたら bash 側も揃える（共有ファイルは無く、別々に書いている）
 
+## CLI ツールの管理 (Nix / Homebrew)
+
+- CLI は Home Manager (standalone) で入れる。構成は `nix/flake.nix` の `homeConfigurations` (`home` / `work` / `ops`。`ops` は手順書用 VM 向けの最小構成)
+- 適用: `nix run home-manager/master -- switch --flake ~/dotfiles/nix#<構成> --impure`。ユーザ名・ホームは env から読むので `--impure` 必須 (公開リポにパスを書かないため)
+- 新しい CLI は `nix/common.nix` (全環境) か `nix/work.nix` (work のみ) に足す。nixpkgs に無い・版が古い等で Nix に置けないものだけ `Brewfile` に理由付きで足す
+- `~/.nix-profile/bin` は `brew shellenv` の後で PATH 先頭に足すので、両方にあるものは Nix 版が優先される
+- nix 設定に秘密を書かない。`/nix/store` は全ユーザが読める
+- CLI を Homebrew から外すときは、先に動いている Claude セッションを開き直す。セッションは起動時の PATH を保持していて、消したパスを呼び続ける
+
 ## ファイル追加時の規約
 
 - 設定ファイルは `link_file` 関数でシンボリックリンクする（コピーではない）

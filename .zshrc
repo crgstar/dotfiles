@@ -1,4 +1,7 @@
 eval "$(/opt/homebrew/bin/brew shellenv)"
+# why: Nix (Home Manager) で入れた CLI を Homebrew 版より優先する。brew shellenv が /opt/homebrew/bin を
+#   先頭に足すので、その後で足す
+[ -d "$HOME/.nix-profile/bin" ] && export PATH="$HOME/.nix-profile/bin:$PATH"
 # why: brew の curl は keg-only でリンクされず、素の curl は macOS 同梱の古い版になる。CVE 修正の速い brew 版を優先する
 export PATH="/opt/homebrew/opt/curl/bin:$PATH"
 eval "$(mise activate zsh)"
@@ -68,6 +71,8 @@ export _ZO_FZF_OPTS="$FZF_DEFAULT_OPTS --no-sort --keep-right"
 eval "$(zoxide init zsh)"
 
 # completion
+# why: Nix で入れた CLI の補完を読む。Nix のシェル初期化は PATH しか足さないので、compinit の前に自分で足す
+[ -d "$HOME/.nix-profile/share/zsh/site-functions" ] && fpath=("$HOME/.nix-profile/share/zsh/site-functions" $fpath)
 # why: compinit は重いので一度だけ。fzf-tab はこの後に source する
 autoload -Uz compinit && compinit
 zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'  # 大小文字無視

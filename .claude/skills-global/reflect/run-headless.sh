@@ -70,8 +70,8 @@ REFLECT_TAGS='SUMMARY|MEMORY|PROPOSAL'
 MAX_ATTEMPTS=2
 
 # why PATH を明示: launchd 起動時の PATH は /usr/bin:/bin 系の最小構成で、
-# gh (homebrew) や claude (~/.local/bin) が見えない
-export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin"
+# gh・jq (Nix / homebrew) や claude (~/.local/bin) が見えない。Nix を先に置くのは対話シェルと揃えるため
+export PATH="$HOME/.nix-profile/bin:/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin"
 
 mkdir -p "$STATE_DIR" "$HOLD" "$(dirname "$INBOX")"
 

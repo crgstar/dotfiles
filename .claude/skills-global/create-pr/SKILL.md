@@ -8,25 +8,15 @@ description: >
   ただし、push だけ・差分の相談だけのときは対象外。
 ---
 
-# Create PR Workflow
+# PR 作成の流れ
 
 ## Phase 1: ブランチと差分の確認
 
-- PR を作るブランチ (head) は **現在のブランチがデフォルト**。ユーザから別ブランチの指示があれば変更する。default branch 上ならどのブランチで作るかをユーザに確認する。
-- ブランチ名が差分の内容と合っているかも見る。作業対象が途中で変わって名前がズレていたら、push 前に `git branch -m` でのリネームを提案する (push 後はリモート追跡と PR の付け替えが要るため、ここが最も安い)。
-- base ブランチはリポジトリの default branch を既定とする。最初に取得して **ユーザに「base は X で進めます」と報告** する (リポによって `main` / `master` / `develop` 等が違うため):
-  ```bash
-  BASE=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
-  ```
-- 並列実行:
-  ```bash
-  git status
-  git log --oneline "$BASE"..HEAD
-  git diff "$BASE"...HEAD --stat
-  git diff "$BASE"...HEAD
-  ```
-- 未コミット変更があれば、含めて commit するか stash するかをユーザに確認する。`git add -A` は使わない。
-- **対応する Issue をユーザに必ず聞く**（「この PR に紐づく Issue はありますか？あれば `owner/repo#N` で教えてください。無ければ『無し』でも OK」）。Issue がある場合のリンク手順は `gh-projects` に従う。cross-repo は PR 作成 *前* に、`gh issue develop` で Issue に紐づけた branch を用意する必要があるため、Phase 7 に進む前にここで確定させる。
+- 現在のブランチに開いている PR があれば、新規作成ではなく既存 PR の編集に切り替えるかをユーザに確認する。切り替えたら、以下の base はその PR のものを使う。
+- head は現在のブランチ、base はリポジトリの default branch を既定とし、**「base は X で進めます」とユーザに報告** する。default branch 上にいるなら、どのブランチで作るかをユーザに確認する。まだ push していないブランチの名前が差分の内容とズレていたら、`git branch -m` でのリネームを提案する。
+- 差分は fetch した最新の `origin/<base>` と比べて読む。
+- 未コミット変更があれば、含めて commit するか stash するかをユーザに確認する。
+- **対応する Issue と、それをこの PR で閉じるかをユーザに必ず聞く**（「この PR に紐づく Issue はありますか？あれば `owner/repo#N` で、この PR の merge で閉じるかと併せて教えてください。無ければ『無し』でも OK」）。リンク手順は `gh-projects` に従う。
 
 ## Phase 2: 既存 PR から慣習を把握
 
@@ -36,7 +26,7 @@ description: >
 gh pr list --state merged --limit 5 --json title,body
 ```
 
-diff や文脈から継続作業とわかるマージ済み PR がある場合は、そのレビューコメントも確認し、再発しやすい指摘観点を本文作成に反映する。
+diff や文脈から継続作業とわかるマージ済み PR がある場合は、そのレビューコメント (インラインの指摘も含めて) も確認し、再発しやすい指摘観点を本文作成に反映する。
 
 PR が無いリポジトリでは `.github/pull_request_template.md` と CLAUDE.md を参照する。両方無ければ Phase 3 のデフォルトカタログで進める。
 
@@ -65,6 +55,8 @@ Phase 2 で抽出した規約 (言語・セクション構成) を優先する�
 
 本文に「別途対応する」と書くなら issue 番号を添える。番号の無い TODO は引き取り手がないまま流れる。
 
+Phase 1 で閉じると答えた Issue には `Closes #N` を書く。
+
 既存コードを調べて数えた件数・行数・比率は本文に出さず、そこから導いた結論だけ書く。コードが変わるたび数字が古くなり、本文が追随を要求する負債になるため。読み手の判断を変える数字だけ、何をどう数えたかと併せて残す:
 
 ```markdown
@@ -79,8 +71,6 @@ Phase 2 で抽出した規約 (言語・セクション構成) を優先する�
 あえて入れなかった防御 (フォールバック・後方互換・ランタイムガード) が diff の外にある前提 (デプロイ単位、到達不能な経路、上流で検証済み) で正当化されるなら、その前提ごと本文に書く。書かれていない前提は、diff しか見えないレビュアーから類型的な防御コーディング指摘として返ってくる。
 
 必要に応じて関連リンク (Issue, 参考文献, 関連 PR) を本文中に差し込むこと。同リポの PR・Issue は `#N` で参照する。箇条書きの中の `#N` は GitHub の画面でタイトルと状態に展開される。タイトルを読ませたいときはそのまま書き、番号だけにしたいとき（文の途中で参照するときなど）はリンクの形 `[#N](URL)` で書く。
-
-`Closes #N` が効くのは、base が default branch の PR だけ。base が default branch 以外なら書かず、その issue は default branch へ入れる PR で閉じると本文に書く。
 
 ## Phase 4: Test plan の検証可能性チェック (最重要)
 
@@ -98,7 +88,7 @@ Phase 2 で抽出した規約 (言語・セクション構成) を優先する�
 ```markdown
 ✓ - [x] make test が通る
 ✓ - [x] curl -X GET /api/foo がローカルで 200 を返す
-✓ - [x] PR ページ上で .github/PULL_REQUEST_TEMPLATE.md の Markdown が崩れなく描画される
+✓ - [x] PR ページ上で .github/pull_request_template.md の Markdown が崩れなく描画される
 ```
 
 ## Phase 5: 推敲
@@ -138,8 +128,7 @@ URL をユーザに返す。
 - **署名は固定**: 本文末尾に必ず `🤖 Generated with [Claude Code](https://claude.com/claude-code)` を 1 行空けて付ける
 - `git add -A` / `git add .` は使わない。変更ファイルを明示指定する
 - `--no-verify` で pre-commit hook をスキップしない
-- 同ブランチに既存 PR があれば新規作成ではなく `gh pr edit` への切替をユーザに確認する
 - 既存 PR の本文を直すときは、GitHub から今の本文を取り直してから書き換える。Web での編集などで、手元の版と食い違っていることがある
 - PR を作った後に変更の中身が変わったら、タイトルも本文と一緒に書き直す
-- 改行を含む body は HEREDOC 経由 (`-b "..."` 直渡しはシェルが壊す)
+- 改行を含む body は HEREDOC 経由 (`--body "..."` 直渡しはシェルが壊す)
 - `<<'EOF'` (quoted heredoc) 内ではバックティック・`$` を含め一切エスケープしない（シェル展開が発生しないため）

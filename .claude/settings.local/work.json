@@ -1,4 +1,10 @@
 {
+  "advisorModel": "fable",
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "xhigh"
+    }
+  },
   "permissions": {
     "allow": [
       "Bash(npx vitest:*)",

@@ -14,7 +14,7 @@ TARGETS=(
   "shell:.zshrc / zshrc.local/<env>.zsh / .bashrc / .bash_profile / bashrc.local/<env>.bash のリンクと fzf-tab の clone"
   "claude-settings:settings.json を base+common+env でマージして ~/.claude/settings.json へ"
   "claude-md:CLAUDE.md を base+env でマージし、FABLE.md と併せてリンク"
-  "skills:スキル・サブエージェント定義のリンク (第三者リポの clone を含む)"
+  "skills:スキル・サブエージェント定義・出力スタイルのリンク (第三者リポの clone を含む)"
   "hooks:permission 系 hook スクリプトのリンク"
   "statusline:statusLine ラッパ・ccstatusline の表示設定・RunCat Neo 用スナップショット生成・キャッシュ寿命ゲージのリンク"
   "reflect:reflect 無人実行 (SessionEnd hook + launchd 夜間ドライバ)"
@@ -590,6 +590,10 @@ target_skills() {
             "$HOME/.claude/agents/skill-md-reviewer.md"
   link_file "$DOTFILES_DIR/.claude/agents/proposal-doc-fixer.md" \
             "$HOME/.claude/agents/proposal-doc-fixer.md"
+  # why: 自作の出力スタイル。全リポで /config から選べるよう user スコープ
+  #      (~/.claude/output-styles) に置く。どのリポで使うかは各リポの outputStyle で選ぶ。
+  link_file "$DOTFILES_DIR/.claude/output-styles/explicit.md" \
+            "$HOME/.claude/output-styles/explicit.md"
   link_file "$DOTFILES_DIR/.claude/skills-global/baton/SKILL.md" \
             "$HOME/.claude/skills/baton/SKILL.md"
   link_file "$DOTFILES_DIR/.claude/skills-global/read-baton/SKILL.md" \

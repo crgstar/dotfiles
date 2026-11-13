@@ -663,6 +663,11 @@ target_skills() {
             "$HOME/.claude/skills/review-comment/SKILL.md"
   link_file "$DOTFILES_DIR/.claude/skills-global/respond-to-pr-review/SKILL.md" \
             "$HOME/.claude/skills/respond-to-pr-review/SKILL.md"
+  # why: 両スキルと annotate-review-flow が、PR に出す文章の
+  #      下書き・推敲・見せ方をこの共有手順で揃える。スキルだけ配ってこのファイルを
+  #      配らないと、スキル本文の参照先が解決しない。
+  link_file "$DOTFILES_DIR/.claude/skills-global/shared/draft-review.md" \
+            "$HOME/.claude/skills/shared/draft-review.md"
 
   # why: respond-to-pr-review の Phase 2 が採否判定と修正実装をこの 2 スキルへ
   #      委譲する。委譲先が dotfiles 外にあると setup.sh を通した他マシンで

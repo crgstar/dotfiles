@@ -1,12 +1,8 @@
 ---
 name: review-comment
 description: >
-  GitHub PR のインラインコメントを書き、投稿するスキル。「PRにコメントして」
-  「インラインコメントしてみて」「レビューコメント書いて」「指摘をPRに残して」
-  「ドラフトを書いて」等に加え、GitHub に出す前提で指摘の文面を書き始めた時点で使う。
-  書くときの規約が本文にあり、書き終えてから読むと作り直しになる。
-  指摘そのものを見つける作業 (sentinel・code-review 等) や PR 本文の作成 (create-pr)、
-  受け取ったレビューへの返信・修正 (respond-to-pr-review) は対象外。
+  GitHub PR のインラインコメントを書き、投稿するスキル。「PRにコメントして」「インラインコメントしてみて」「レビューコメント書いて」「指摘をPRに残して」「ドラフトを書いて」等に加え、GitHub に出す前提で指摘の文面を書き始めた時点で使う。
+  対象外: 指摘そのものを見つける作業 (sentinel・code-review 等)、PR 本文の作成 (create-pr)、受け取ったレビューへの返信・修正 (respond-to-pr-review)。
 ---
 
 # Review Comment

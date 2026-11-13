@@ -1,17 +1,9 @@
 ---
 name: add-dir-manager
 description: |
-  Claude Code の additionalDirectories (--add-dir / settings の追加ワーキングディレクトリ) を
-  複数リポにまたがって安全に管理するスキル。一覧表示・パスの追加・削除・sibling グループの
-  一括クロスリンクに対応する。各リポの .claude/settings.local.json に対して jq で atomic に
-  merge し、既存の permissions / hooks / outputStyle 等は壊さない。
-  「add-dir の状況」「additionalDirectories を確認」「クロスリンク」「sibling リポを互いに
-  見えるようにして」「infra-* / management-* / apps-* に一律で add-dir」「X リポに
-  /path/to/Y を追加」「Z リポから infra-private を外して」「グループ一括セットアップ」
-  などのリクエストで使用する。複数リポに settings.local.json を手で書き換えるのは jq merge
-  を毎回再発明することになり self-exclusion ミスも起きやすいので、これらの文脈ではこのスキル
-  を必ず使うこと。単発のクロスリポ Read permission 追加など別の意図ではなく、
-  additionalDirectories (add-dir) の管理が文脈に含まれる場合に発動する。
+  Claude Code の additionalDirectories (--add-dir / settings の追加ワーキングディレクトリ) を複数リポにまたがって管理するスキル。一覧表示・パスの追加・削除・sibling グループの一括クロスリンクに使う。
+  「add-dir の状況」「additionalDirectories を確認」「クロスリンク」「sibling リポを互いに見えるようにして」「infra-* / management-* / apps-* に一律で add-dir」「X リポに /path/to/Y を追加」「Z リポから infra-private を外して」「グループ一括セットアップ」等のリクエストや、複数リポの settings.local.json を手で書き換えようとしたときに使う。
+  対象外: 単発のクロスリポ Read permission の追加など、add-dir の管理を含まない依頼。
 ---
 
 # add-dir-manager

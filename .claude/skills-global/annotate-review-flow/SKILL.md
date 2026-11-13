@@ -1,11 +1,9 @@
 ---
 name: annotate-review-flow
 description: >
-  GitHub PRのreview単位への積み直し(jj-restack-pr)・指摘出し(sentinel)・採否判定(review-verdict)・mirugitへの反映(annotate)・議論を経た選別投稿(review-comment)または修正PRの作成(create-pr)を
-  一つの流れとして繋ぐスキル。「このPRをレビューして議論しながら進めたい」「sentinelしてannotateにして」
-  「PRの指摘を洗い出してmirugitで相談したい」「議論した上でPRに残すか決めたい」等、PR番号や対象PRが
-  明示されたリクエストで使う。対象外: PRを指さないローカル差分のレビュー（sentinel単体の領分）、
-  jj-restack-pr単体・sentinel単体・review-verdict単体・annotate単体・review-comment単体・create-pr単体のみで完結する依頼。それぞれ単体スキルに任せる。
+  GitHub PRのreview単位への積み直し(jj-restack-pr)・指摘出し(sentinel)・採否判定(review-verdict)・mirugitへの反映(annotate)・議論を経た選別投稿(review-comment)または修正PRの作成(create-pr)を一つの流れとして繋ぐスキル。
+  「このPRをレビューして議論しながら進めたい」「sentinelしてannotateにして」「PRの指摘を洗い出してmirugitで相談したい」「議論した上でPRに残すか決めたい」等、PR番号や対象PRが明示されたリクエストで使う。
+  対象外: PRを指さないローカル差分のレビュー（sentinel単体の領分）、jj-restack-pr・sentinel・review-verdict・annotate・review-comment・create-pr のどれか1つで完結する依頼（そのスキル単体に任せる）。
 ---
 
 # Annotate Review Flow

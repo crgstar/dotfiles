@@ -787,6 +787,8 @@ target_hooks() {
             "$HOME/.claude/hooks/cd-outside-workspace-gate.sh"
   link_file "$DOTFILES_DIR/.claude/hooks/rm-to-trash.sh" \
             "$HOME/.claude/hooks/rm-to-trash.sh"
+  link_file "$DOTFILES_DIR/.claude/hooks/skill-listing-check.sh" \
+            "$HOME/.claude/hooks/skill-listing-check.sh"
 }
 
 target_statusline() {

@@ -2,7 +2,6 @@
   "cleanupPeriodDays": 3650,
   "permissions": {
     "allow": [
-      "Read(*)",
       "Bash(ls *)",
       "Bash(cat *)",
       "Bash(cat */.mirugit/*)",
